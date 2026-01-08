@@ -1,5 +1,5 @@
 define:
-  type: asab/prompt
+  type: llm/prompt
 
 instructions: |
   You are a helpful assistant.
