@@ -26,6 +26,17 @@ While MCP works well for desktop applications and local integrations, it present
 * **Dynamic Tool Discovery**: Microservices register their capabilities via [Apache Zookeeper](https://en.wikipedia.org/wiki/Apache_ZooKeeper); `llm-microlink` picks them up automatically
 * **Native Tool Calling**: Leverages built-in function calling capabilities of modern LLMs for reliable, structured interactions
 
+## Architecture
+
+Component diagram:
+
+![Component diagram](./docs/llm-microlink-component.png)
+
+
+Sequence diagram:
+
+![Sequence diagram](./docs/llm-microlink-sequence.png)
+
 ## Built With
 
 * [Python](https://www.python.org) & [ASAB](https://github.com/TeskaLabs/asab) microservice framework
