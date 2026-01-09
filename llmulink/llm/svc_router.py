@@ -279,15 +279,6 @@ class LLMRouterService(asab.Service):
 							"item": function_call.to_dict(),
 						})
 
-				case "read_note":
-					arguments = json.loads(function_call.arguments)
-					content = await self.App.MCPHandler.tool_read_note(arguments["path"])
-					function_call.content = content
-					await self.send_update(conversation, {
-							"type": "item.updated",
-							"item": function_call.to_dict(),
-						})
-
 				case _:
 					L.warning("Unknown function call", struct_data={"name": function_call.name})
 					function_call.content = f"Called unknown function '{function_call.name}', no result available."
