@@ -22,9 +22,9 @@ class LocalToolProvider(ToolProviderABC):
 				parameters = {
 					"type": "object",
 					"properties": {
-						"host": {
+						"target": {
 							"type": "string",
-							"description": "The host to ping"
+							"description": "The fully qualified hostname or IP address to ping"
 						}
 					},
 					"required": ["host"]
@@ -40,6 +40,6 @@ class LocalToolProvider(ToolProviderABC):
 				async for _ in tool_ping(function_call):
 					yield _
 			case _:
-				function_call.error = "Tool not found"
+				function_call.content = "Tool not found"
 				function_call.error = True
 				yield

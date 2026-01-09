@@ -45,7 +45,7 @@ class ToolService(asab.Service):
 		
 		if provider is None:
 			L.warning("Tool not found", struct_data={"name": function_call.name})
-			function_call.error = "Tool not found"
+			function_call.content = "Tool not found"
 			function_call.error = True
 			yield
 			return
