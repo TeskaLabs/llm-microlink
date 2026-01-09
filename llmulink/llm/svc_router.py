@@ -4,12 +4,11 @@ import random
 import asyncio
 import logging
 
-import yaml
 import asab
+import yaml
 import jinja2
 
 from .datamodel import Conversation, UserMessage, Exchange, FunctionCall, FunctionCallTool
-from .tool_ping import tool_ping
 
 from .provider.v1response import LLMChatProviderV1Response
 from .provider.v1messages import LLMChatProviderV1Messages
@@ -243,19 +242,11 @@ class LLMRouterService(asab.Service):
 		})
 
 		try:
-			match function_call.name:
-
-				case "ping":
-					async for _ in tool_ping(function_call):
-						await self.send_update(conversation, {
-							"type": "item.updated",
-							"item": function_call.to_dict(),
-						})
-
-				case _:
-					L.warning("Unknown function call", struct_data={"name": function_call.name})
-					function_call.content = f"Called unknown function '{function_call.name}', no result available."
-					function_call.error = True
+			async for _ in self.App.ToolService.execute_tool(function_call):
+				await self.send_update(conversation, {
+					"type": "item.updated",
+					"item": function_call.to_dict(),
+				})
 
 		except Exception as e:
 			L.exception("Error in function call", struct_data={"name": function_call.name})

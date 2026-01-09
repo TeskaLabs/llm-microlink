@@ -1,3 +1,4 @@
+import typing
 import asyncio
 import logging
 
@@ -28,7 +29,12 @@ class ToolService(asab.Service):
 
 
 	def get_tools(self) -> list[FunctionCallTool]:
-		return list(self.Tools.values())	
+		return list(self.Tools.values())
+
+
+	async def execute_tool(self, function_call) -> typing.AsyncGenerator[typing.Any, None]:
+		print(">>>", function_call)
+		yield "... executing tool ..."
 
 
 	async def initialize(self, app):
