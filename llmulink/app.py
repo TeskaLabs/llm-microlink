@@ -5,7 +5,7 @@ import asab.library
 import asab.web.rest
 
 from .llm import LLMRouterService, LLMWebHandler
-from .tool import ToolService
+from .tool import ToolService, ToolWebHandler
 
 #
 
@@ -56,3 +56,4 @@ class LLMMicrolinkApplication(asab.Application):
 
 		# Initialize ToolService
 		self.ToolService = ToolService(self)
+		self.ToolWebHandler = ToolWebHandler(self)
