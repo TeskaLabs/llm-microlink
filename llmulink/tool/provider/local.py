@@ -2,7 +2,7 @@ import logging
 import typing
 
 from .provider_abc import ToolProviderABC
-from .local_tools.ping import tool_ping
+from .function_call.ping import fuction_call_ping
 from ..tool import FunctionCallTool
 
 #
@@ -13,7 +13,7 @@ L = logging.getLogger(__name__)
 class LocalToolProvider(ToolProviderABC):
 		
 
-	async def initialize(self):
+	def get_tools(self) -> list[typing.Any]:	
 		tools = [
 			FunctionCallTool(
 				name = "ping",
@@ -28,18 +28,15 @@ class LocalToolProvider(ToolProviderABC):
 						}
 					},
 					"required": ["host"]
-				}
+				},
+				function_call = fuction_call_ping
 			)
 		]
-		self.ToolService._register(self, tools)
+		return tools
 
 
-	async def execute(self, function_call) -> typing.AsyncGenerator[typing.Any, None]:
-		match function_call.name:
-			case "ping":
-				async for _ in tool_ping(function_call):
-					yield _
-			case _:
-				function_call.content = "Tool not found"
-				function_call.error = True
-				yield
+	def get_tool(self, function_call):
+		for tool in self.get_tools():
+			if tool.name == function_call.name:
+				return tool
+		return None

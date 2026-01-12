@@ -12,11 +12,13 @@ class ToolProviderABC(abc.ABC):
 		self.ToolService = tool_service
 		self.Id = str(uuid.uuid4())
 
-	@abc.abstractmethod
 	async def initialize(self):
 		pass
 
 	@abc.abstractmethod
-	async def execute(self, function_call) -> typing.AsyncGenerator[typing.Any, None]:
+	def get_tool(self, function_call) -> typing.AsyncGenerator[typing.Any, None]:
 		pass
 	
+	@abc.abstractmethod
+	def get_tools(self) -> list[typing.Any]:
+		pass

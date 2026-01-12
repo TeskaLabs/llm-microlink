@@ -20,8 +20,6 @@ class ToolService(asab.Service):
 	def __init__(self, app, service_name="ToolService"):
 		super().__init__(app, service_name)
 
-		self.Tools = {}
-
 		self.Providers = [LocalToolProvider(self)]
 
 		if 'zookeeper' in asab.Config.sections():
@@ -30,56 +28,45 @@ class ToolService(asab.Service):
 
 
 	def get_tools(self) -> list[FunctionCallTool]:
-		return list(self.Tools.values())
+		ret = list()
+		for provider in self.Providers:
+			try:
+				tools = provider.get_tools()
+				ret.extend(tools)
+			except Exception as e:
+				L.exception("Error getting tools from provider", struct_data={"provider": provider.Id})
+		return ret
 
 
 	async def execute(self, function_call) -> typing.AsyncGenerator[typing.Any, None]:
-		provider = None
-		for provider_id, tool_name in self.Tools.keys():
-			if tool_name == function_call.name:
-				for p in self.Providers:
-					if p.Id == provider_id:
-						provider = p
-						break
+		tool = None
+		for provider in self.Providers:
+			tool = provider.get_tool(function_call)
+			if tool is not None:
 				break
 		
-		if provider is None:
-			L.warning("Tool not found", struct_data={"name": function_call.name})
+		if tool is None:
 			function_call.content = "Tool not found"
 			function_call.error = True
+			function_call.status = 'completed'
 			yield
 			return
 
-		async for result in provider.execute(function_call):
-			yield result
+		try:
+			async for result in tool.function_call(function_call):
+				yield result
+			function_call.status = 'completed'
+		except Exception:
+			L.exception("Error executing tool", struct_data={"name": function_call.name})
+			if len(function_call.content) > 0:
+				function_call.content += "\n\n"
+			function_call.content += "Tool failed."
+			function_call.error = True
+			function_call.status = 'completed'
+			yield
 
 
 	async def initialize(self, app):
 		async with asyncio.TaskGroup() as tg:
 			for provider in self.Providers:
 				tg.create_task(provider.initialize())
-
-
-	def _register(self, provider: ToolProviderABC, tools: list[FunctionCallTool]):
-		'''
-		Register (update) a list of tools provided by a provider.
-		'''
-		for tool in tools:
-			if (provider.Id,tool.name) in self.Tools:
-				continue
-			for _, existing_tool_name in self.Tools.keys():
-				if existing_tool_name == tool.name:
-					L.warning("Tool with the sama name is already registered by other tool provider", struct_data={"provider": provider.Id, "tool": tool.name})
-					continue
-			self.Tools[(provider.Id,tool.name)] = tool
-
-		# Remove tools that are no longer provided by the provider
-		to_remove = []
-		tools_names = {t.name for t in tools}
-		for provider_id, tool_name in self.Tools.keys():
-			if provider_id != provider.Id:
-				continue
-			if tool_name not in tools_names:
-				to_remove.append((provider_id, tool_name))
-		for provider_id, tool_name in to_remove:
-			del self.Tools[(provider_id, tool_name)]

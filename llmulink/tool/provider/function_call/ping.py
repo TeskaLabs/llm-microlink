@@ -5,7 +5,7 @@ import asyncio
 
 L = logging.getLogger(__name__)
 
-async def tool_ping(function_call) -> None:
+async def fuction_call_ping(function_call) -> None:
 	"""
 	Ping a target host or service to check if it's reachable.
 	
