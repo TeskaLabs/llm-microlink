@@ -13,7 +13,20 @@ class ToolWebHandler():
 
 	def __init__(self, app):
 		self.ToolService = app.ToolService
+		app.WebContainer.WebApp.router.add_get(r"/{tenant}/tools", self.tools)
 		app.WebContainer.WebApp.router.add_put(r"/{tenant}/function_call", self.function_call)
+
+
+	async def tools(self, request):
+		tools = self.ToolService.get_tools()
+		return asab.web.rest.json_response(
+			request,
+			data={
+				"result": "OK",
+				"data": [tool.model_dump(mode='json') for tool in tools],
+			}
+		)
+
 
 	async def function_call(self, request):
 		json_data = await request.json()
