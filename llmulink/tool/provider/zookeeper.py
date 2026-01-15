@@ -6,16 +6,20 @@ import pydantic
 
 from .provider_abc import ToolProviderABC
 from ..tool import FunctionCallTool
+from .function_call.rest import FunctionCallRest
 
 #
 
 L = logging.getLogger(__name__)
 
 #
+
 class ZookeeperToolProvider(ToolProviderABC):
 
 	def __init__(self, tool_service):
 		super().__init__(tool_service)
+
+		self.Tools = []
 		
 		tool_service.App.PubSub.subscribe("ZooKeeperContainer.state/CONNECTED!", self.discover)
 		tool_service.App.PubSub.subscribe("application.tick/10!", self.discover)
@@ -24,7 +28,18 @@ class ZookeeperToolProvider(ToolProviderABC):
 	async def initialize(self):
 		await self.discover("initialize")
 
-	
+
+	def get_tools(self) -> list[typing.Any]:
+		return self.Tools
+
+
+	def get_tool(self, function_call):
+		for tool in self.get_tools():
+			if tool.name == function_call.name:
+				return tool
+		return None
+
+
 	async def discover(self, event_name, zkcontainer = None):
 		if zkcontainer is not None and zkcontainer != self.ToolService.App.ZkContainer:
 			# Not for me
@@ -47,7 +62,7 @@ class ZookeeperToolProvider(ToolProviderABC):
 			if tool is not None:
 				tools.append(tool)
 
-		self.ToolService._register(self, tools)
+		self.Tools = tools
 
 
 	async def _discover_tool(self, zk, tool_path):
@@ -67,11 +82,23 @@ class ZookeeperToolProvider(ToolProviderABC):
 			L.warning("Error loading tool definition", struct_data={"error": str(e), "tool_path": tool_path})
 			return
 
+		function_call_type = tool_definition.function_call.get('type')
+		function_call = None
+		match function_call_type:
+			case 'rest':
+				function_call = FunctionCallRest(
+					**tool_definition.function_call
+				)
+			case _:
+				L.warning("Unknown function call type", struct_data={"function_call_type": function_call_type})
+				return
+
 		return FunctionCallTool(
 			name=tool_definition.name,
 			description=tool_definition.description,
 			parameters=tool_definition.parameters.model_dump(),
 			title=tool_definition.title,
+			function_call=function_call,
 		)
 
 
@@ -116,11 +143,15 @@ class ToolDefinition(pydantic.BaseModel):
 		      description: The path to the markdown note.
 		  required:
 		  - path
+
+		function_call: {...}
 	"""
 	define: ToolDefine
 	description: str
 	title: str = None
+	function_call: dict
 	parameters: ToolParameters = pydantic.Field(default_factory=ToolParameters)
+
 
 	@classmethod
 	def from_yaml(cls, yaml_content: str | bytes) -> 'ToolDefinition':

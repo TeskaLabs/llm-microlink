@@ -1,3 +1,4 @@
+import typing
 import pydantic
 
 class FunctionCallTool(pydantic.BaseModel):
@@ -6,3 +7,4 @@ class FunctionCallTool(pydantic.BaseModel):
 	description: str
 	parameters: dict
 	title: str = None
+	function_call: typing.Any = None

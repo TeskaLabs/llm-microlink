@@ -5,7 +5,7 @@ import asab.library
 import asab.web.rest
 
 from .llm import LLMRouterService, LLMWebHandler
-from .tool import ToolService
+from .tool import ToolService, ToolWebHandler
 
 #
 
@@ -47,6 +47,9 @@ class LLMMicrolinkApplication(asab.Application):
 			self.ZkContainer = asab.zookeeper.ZooKeeperContainer(self.ZooKeeperService, 'zookeeper')
 			self.ASABApiService.initialize_zookeeper(self.ZkContainer)
 
+		# Initialize the Tenant service
+		self.TenantService = asab.web.tenant.TenantService(self)
+
 		# Initialize LibraryService
 		self.LibraryService = asab.library.LibraryService(self, "LibraryService")
 
@@ -56,3 +59,4 @@ class LLMMicrolinkApplication(asab.Application):
 
 		# Initialize ToolService
 		self.ToolService = ToolService(self)
+		self.ToolWebHandler = ToolWebHandler(self)

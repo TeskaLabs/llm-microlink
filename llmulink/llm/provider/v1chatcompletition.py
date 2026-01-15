@@ -106,7 +106,7 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 		self._current_tool_calls = {}  # Indexed by tool call index
 
 		async with aiohttp.ClientSession(headers=self.prepare_headers()) as session:
-			async with session.post(self.URL + "v1/chat/completions", json=data) as response:
+			async with session.post(self.URL + "v1/chat/completions", json=data, timeout=60*10) as response:
 				if response.status != 200:
 					text = await response.text()
 					L.error(

@@ -80,7 +80,7 @@ class LLMWebHandler():
 
 								case 'conversation.restart':
 									self.LLMRouterService.restart_conversation(conversation, key=data.get('key'))
-									await self.App.LLMRouterService.send_full_update(conversation, reply_to_client)
+									await self.LLMRouterService.send_full_update(conversation, reply_to_client)
 
 								case 'conversation.instructions.update':
 									await self.LLMRouterService.update_instructions(conversation, data.get('item'), data.get('params', {}))

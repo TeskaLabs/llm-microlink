@@ -26,7 +26,7 @@ While MCP works well for desktop applications and local integrations, it present
 ## Key Features
 
 * **Universal LLM Support**: Connect to local models (vLLM, TensorRT-LLM) or frontier APIs (OpenAI, Anthropic Claude) through a unified interface
-* **Dynamic Tool Discovery**: Microservices register their capabilities via [Apache Zookeeper](https://en.wikipedia.org/wiki/Apache_ZooKeeper); `llm-microlink` picks them up automatically
+* **Tool Discovery**: Microservices advertise their capabilities and `llm-microlink` picks them up automatically
 * **Native Tool Calling**: Leverages built-in function calling capabilities of modern LLMs for reliable, structured interactions
 
 ## Architecture
@@ -40,8 +40,15 @@ Sequence diagram:
 
 ![Sequence diagram](./docs/llm-microlink-sequence.png)
 
+
 ## Built With
 
 * [Python](https://www.python.org) & [ASAB](https://github.com/TeskaLabs/asab) microservice framework
-* [Apache Zookeeper](https://en.wikipedia.org/wiki/Apache_ZooKeeper) for tools & service discovery
+
+
+## Tools Discovery
+
+The mechanism of tools discovery is extendible by "providers".
+Currently a provider for [Apache Zookeeper](https://en.wikipedia.org/wiki/Apache_ZooKeeper) is available.
+It is relatively simple to add more tools discovery providers for other technologies such as `etcd` or Consul.
 

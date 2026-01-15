@@ -2,11 +2,10 @@ import json
 import logging
 import asyncio
 
-from .datamodel import FunctionCall
 
 L = logging.getLogger(__name__)
 
-async def tool_ping(function_call: FunctionCall) -> None:
+async def fuction_call_ping(function_call) -> None:
 	"""
 	Ping a target host or service to check if it's reachable.
 	
@@ -23,13 +22,13 @@ async def tool_ping(function_call: FunctionCall) -> None:
 		arguments = json.loads(function_call.arguments)
 	except Exception as e:
 		L.exception("Exception occurred while parsing arguments: '{}'".format(function_call.arguments), struct_data={"error": str(e)})
-		function_call.error = f"Exception occurred while parsing arguments."
+		function_call.content = "Exception occurred while parsing arguments."
 		function_call.error = True
 		return
 
 	target = arguments.get("target")
 	if not target:
-		function_call.error = "Target is required"
+		function_call.content = "Parameter 'target' is required"
 		function_call.error = True
 		return
 
@@ -40,7 +39,7 @@ async def tool_ping(function_call: FunctionCall) -> None:
 	)
 	
 	if not sanitized_target:
-		function_call.error = "Invalid target specified"
+		function_call.content = "Invalid paramater 'target' specified"
 		function_call.error = True
 		return
 	
@@ -88,10 +87,10 @@ async def tool_ping(function_call: FunctionCall) -> None:
 
 	except FileNotFoundError:
 		L.warning("ping command not found on this system")
-		function_call.error = "ping command not found on this system"
+		function_call.content = "A command 'ping' was not found on this system"
 		function_call.error = True
 		
 	except Exception as e:
 		L.exception("Exception occurred while executing ping", struct_data={"error": str(e)})
-		function_call.error = f"Exception occurred while executing ping"
+		function_call.content = "Exception occurred while executing command 'ping'"
 		function_call.error = True
