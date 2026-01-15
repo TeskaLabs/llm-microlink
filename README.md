@@ -4,6 +4,7 @@ Status: early-stage (not production ready)
 
 `llm-microlink` is an LLM proxy that connects [large language models](https://en.wikipedia.org/wiki/Large_language_model) to your [microservice](https://en.wikipedia.org/wiki/Microservices) ecosystem, enabling seamless **tool calling**.
 It discovers tools advertised by your microservices, passes them to the LLM, executes tool calls via REST APIs, and feeds results back into the conversation.
+This approach essentially runs microservices into AI agents.
 
 The goal is to provide a scalable, enterprise-grade approach to LLM automation within microservice ecosystems.
 
