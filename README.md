@@ -8,6 +8,8 @@ This approach essentially runs microservices into AI agents.
 
 The goal is to provide a scalable, enterprise-grade approach to LLM automation within microservice ecosystems.
 
+It implements "agent loop" as described ie here: https://openai.com/index/unrolling-the-codex-agent-loop/
+
 ## Why Not MCP?
 
 This project is not an [MCP](https://modelcontextprotocol.io/) implementation.
