@@ -74,8 +74,8 @@ class LLMRouterService(asab.Service):
 
 	async def stop_conversation(self, conversation: Conversation) -> None:
 		for task in conversation.tasks:
-			conversation.chat_requested = False
 			task.cancel()
+		conversation.loop_break = True
 		L.log(asab.LOG_NOTICE, "Conversation stopped", struct_data={"conversation_id": conversation.conversation_id})
 
 
@@ -126,11 +126,11 @@ class LLMRouterService(asab.Service):
 		def on_task_done(task):
 			conversation.tasks.remove(task)
 
-			if len(conversation.tasks) == 0 and conversation.chat_requested:
+			if len(conversation.tasks) == 0 and not conversation.loop_break:
 				# Initialize a new exchange with LLM
 				new_exchange = Exchange()
 				conversation.exchanges.append(new_exchange)
-				conversation.chat_requested = False
+				conversation.loop_break = True
 
 				t = asyncio.create_task(
 					self.task_chat_request(conversation, new_exchange),
@@ -152,7 +152,7 @@ class LLMRouterService(asab.Service):
 			conversation,
 			{
 				"type": "tasks.updated",
-				"count": len(conversation.tasks) + (1 if conversation.chat_requested else 0),
+				"count": len(conversation.tasks) + (0 if conversation.loop_break else 1),
 			}
 		)
 
@@ -228,11 +228,11 @@ class LLMRouterService(asab.Service):
 			L.exception("Error sending full update to monitors", struct_data={"conversation_id": conversation.conversation_id})
 
 
-	async def create_function_call(self, conversation: Conversation, function_call: FunctionCall):
-		await self.schedule_task(conversation, function_call, self.task_function_call)
+	async def create_function_call(self, conversation: Conversation, exchange: Exchange, function_call: FunctionCall):
+		await self.schedule_task(conversation, exchange, self.task_function_call, function_call)
 		
 
-	async def task_function_call(self, conversation: Conversation, function_call: FunctionCall) -> None:
+	async def task_function_call(self, conversation: Conversation, exchange: Exchange, function_call: FunctionCall) -> None:
 		L.log(asab.LOG_NOTICE, "Calling function ...", struct_data={"name": function_call.name})
 
 		function_call.status = 'executing'
@@ -261,7 +261,7 @@ class LLMRouterService(asab.Service):
 			})
 
 			# Flag the conversation that is chat requested
-			conversation.chat_requested = True
+			conversation.loop_break = False
 
 
 def normalize_text(text: str) -> str:

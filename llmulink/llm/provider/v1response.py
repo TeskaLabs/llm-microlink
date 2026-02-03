@@ -317,7 +317,7 @@ class LLMChatProviderV1Response(LLMChatProviderABC):
 					})
 
 					if isinstance(item, FunctionCall):
-						await self.LLMChatService.create_function_call(conversation, item)
+						await self.LLMChatService.create_function_call(conversation, exchange, item)
 
 				else:
 					L.warning("Unknown item for 'response.output_item.done'")

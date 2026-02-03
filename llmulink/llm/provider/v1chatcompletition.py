@@ -244,7 +244,7 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 						"type": "item.updated",
 						"item": item.to_dict(),
 					})
-					await self.LLMChatService.create_function_call(conversation, item)
+					await self.LLMChatService.create_function_call(conversation, exchange, item)
 
 
 	async def _finalize_stream(self, conversation: Conversation, exchange: Exchange) -> None:
@@ -267,7 +267,7 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 					"type": "item.updated",
 					"item": item.to_dict(),
 				})
-				await self.LLMChatService.create_function_call(conversation, item)
+				await self.LLMChatService.create_function_call(conversation, exchange, item)
 
 		# Reset state
 		self._current_assistant_message = None

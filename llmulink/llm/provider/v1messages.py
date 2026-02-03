@@ -279,7 +279,7 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 					})
 
 					if isinstance(item, FunctionCall):
-						await self.LLMChatService.create_function_call(conversation, item)
+						await self.LLMChatService.create_function_call(conversation, exchange, item)
 
 				self._current_content_block = None
 				self._current_content_block_index = None
