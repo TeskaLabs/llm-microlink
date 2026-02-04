@@ -60,12 +60,13 @@ class LLMRouterService(asab.Service):
 
 		L.log(asab.LOG_NOTICE, "New conversation created", struct_data={"conversation_id": conversation_id})
 
-		async with self.LibraryService.open("/AI/Prompts/default.yaml") as item_io:
-			promt_decl = yaml.safe_load(item_io.read().decode("utf-8"))
+		async with self.LibraryService.open("/AI/Prompts/default.md") as item_io:
+			# instructions = yaml.safe_load(item_io.read().decode("utf-8"))
+			instructions = item_io.read().decode("utf-8")
 
 		conversation = Conversation(
 			conversation_id=conversation_id,
-			instructions=promt_decl["instructions"],
+			instructions=instructions,
 			tools=self.App.ToolService.get_tools()
 		)
 		self.Conversations[conversation.conversation_id] = conversation
@@ -90,11 +91,15 @@ class LLMRouterService(asab.Service):
 	async def update_instructions(self, conversation: Conversation, item: str, params: dict) -> None:
 		assert item.startswith("/AI/Prompts/"), "Item must be a prompt in the AI/Prompts directory"
 		
+		instructions = None
 		async with self.LibraryService.open(item) as item_io:
-			promt_decl = yaml.safe_load(item_io.read().decode("utf-8"))
+			if item_io is not None:
+				instructions = item_io.read().decode("utf-8")
 
-		instructions = promt_decl["instructions"]
-		conversation.instructions = jinja2.Template(instructions).render(params)
+		if instructions is not None:
+			conversation.instructions = jinja2.Template(instructions).render(params)
+		else:
+			L.warning("Prompt not found", struct_data={"item": item})
 
 
 	async def get_conversation(self, conversation_id, create=False):
