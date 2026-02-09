@@ -93,6 +93,9 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 			"model": model,
 			"messages": messages,
 			"stream": True,
+			"stream_options": {
+				"include_usage": True,
+			},
 		}
 
 		tools = self._build_tools(conversation)
@@ -102,6 +105,18 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 		L.log(asab.LOG_NOTICE, "Sending request to LLM", struct_data={"conversation_id": conversation.conversation_id, "model": model, "provider": self.URL})
 
 		async with aiohttp.ClientSession(headers=self.prepare_headers()) as session:
+
+			# vLLM tokenize endpoint
+			async with session.post(self.URL + "tokenize", json=data, timeout=60*10) as response:
+				if response.status == 200:
+					token_count = await response.json()
+					await self.LLMChatService.send_update(conversation, {
+						"type": "chat.tokens",
+						"token_count": token_count.get('count'),
+						"token_max": token_count.get('max_model_len'),
+					})
+
+
 			async with session.post(self.URL + "v1/chat/completions", json=data, timeout=60*10) as response:
 				if response.status != 200:
 					text = await response.text()

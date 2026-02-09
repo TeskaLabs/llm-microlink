@@ -17,6 +17,7 @@ class AssistentReasoning(pydantic.BaseModel):
 	"""Reasoning block from the LLM response."""
 	content: str
 	status: str
+	index: int = None  # LLMChatProviderV1Messages is using this index to identify the content block
 	key: str = pydantic.Field(default_factory=lambda: "reasoning-{}".format(str(uuid.uuid4())))
 	type: typing.Literal['reasoning'] = 'reasoning'
 	created_at: datetime.datetime = pydantic.Field(default_factory=_utc_now)
@@ -36,6 +37,7 @@ class AssistentMessage(pydantic.BaseModel):
 	content: str
 	status: str
 	role: str
+	index: int = None  # LLMChatProviderV1Messages is using this index to identify the content block
 	key: str = pydantic.Field(default_factory=lambda: "message-{}".format(str(uuid.uuid4())))
 	type: typing.Literal['message'] = 'message'
 	created_at: datetime.datetime = pydantic.Field(default_factory=_utc_now)
@@ -79,7 +81,7 @@ class FunctionCall(pydantic.BaseModel):
 	status: str
 	content: str = ''
 	error: bool = False
-	index: int = None  # LLMChatProviderV1ChatCompletition is using this index to identify the tool call
+	index: int = None  # LLMChatProviderV1ChatCompletition and LLMChatProviderV1Messages are using this index to identify the tool call
 	key: str = pydantic.Field(default_factory=lambda: "fc-{}".format(str(uuid.uuid4())))
 	type: typing.Literal['function_call'] = 'function_call'
 	created_at: datetime.datetime = pydantic.Field(default_factory=_utc_now)
