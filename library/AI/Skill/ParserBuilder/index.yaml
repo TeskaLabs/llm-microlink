@@ -1,0 +1,29 @@
+define:
+  type: llm/skill
+
+instructions:
+  - +prompt.md
+
+tools:
+  compile_parser:
+    title: Compile the parser
+    description: |
+      This tool compiles the parser written in Go.
+      Your reply must contain the Go code of the parser, in the assistent message.
+      
+      The Go parser code must be in the following format:
+
+      ---
+      Go parser code:
+
+      ```go
+      <Go code of the parser>
+      ```
+      ---
+
+      This tool will seek for the parser code in the assistent message.
+      It will not look for the code in the user message.
+      
+      The tool will return the result of the compilation, stdout and stderr of the Go compiler.
+
+    parameters: {}

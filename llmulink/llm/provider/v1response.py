@@ -8,6 +8,7 @@ import asab
 
 from ..datamodel import Conversation, Exchange, AssistentMessage, AssistentReasoning, FunctionCall, FunctionCallTool
 from .provider_abc import LLMChatProviderABC
+from ..models import measure_tokens_vllm
 
 L = logging.getLogger(__name__)
 
@@ -60,13 +61,12 @@ class LLMChatProviderV1Response(LLMChatProviderABC):
 							"output": item.content,
 						})
 
-
 		model = conversation.get_model()
 		assert model is not None
 
 		data = {
 			"model": model,
-			"instructions": conversation.instructions,
+			"instructions": "\n".join(conversation.instructions),
 			"input": inp,
 			"stream": True,  # We expect an SSE response / "text/event-stream"
 		}
@@ -78,7 +78,9 @@ class LLMChatProviderV1Response(LLMChatProviderABC):
 		L.log(asab.LOG_NOTICE, "Sending request to LLM", struct_data={"conversation_id": conversation.conversation_id, "model": model, "provider": self.URL})
 
 		async with aiohttp.ClientSession(headers=self.prepare_headers()) as session:
-			async with session.post(self.URL + "v1/responses", json=data) as response:
+			await measure_tokens_vllm(self.LLMChatService, session, self.URL, data, conversation)
+
+			async with session.post(self.URL + "v1/responses", json=data, timeout=60*30) as response:
 				if response.status != 200:
 					text = await response.text()
 					L.error(
@@ -88,48 +90,33 @@ class LLMChatProviderV1Response(LLMChatProviderABC):
 					return
 
 				assert response.content_type == "text/event-stream"
-				event = []  # Accumulator for the event block in the SSE response
 
-				async for line in response.content:
-					if line == b'\n':
-						if len(event) > 0:
-							# Empty line indicates the end of the event block in the SSE response
-							await self._on_llm_event(conversation, exchange, event)
-							event = []
-						continue
+				eventbuffer = b''
+				async for chunk in response.content.iter_any():
+					eventbuffer += chunk
 
-					p = line.find(b': ')
-					if p == -1:
-						L.warning("Invalid line in SSE response")
-						return
+					while True:
+						i = eventbuffer.find(b'\n\n')
+						if i == -1:
+							break
 
-					event_type = line[:p].decode("utf-8")					
-					match event_type:
-						case "data":
-							data = json.loads(line[p+2:].decode("utf-8"))
-							event.append(('data', data))
-						case "event":
-							event.append(('event', line[p+2:-1].decode("utf-8")))
-						case _:
-							L.warning("Unknown event type in SSE response", struct_data={"event_type": event_type})
-							event.append(('???', line))
+						await self._on_llm_event(conversation, exchange, eventbuffer[:i])
+						eventbuffer = eventbuffer[i+2:]					
 
-				if len(event) > 0:
-					await self._on_llm_event(conversation, exchange, event)
-					event = []
+				if len(eventbuffer) > 0:
+					await self._on_llm_event(conversation, exchange, eventbuffer)
 
 
-	async def _on_llm_event(self, conversation: Conversation, exchange: Exchange, event_items: list[tuple[str, dict | str | bytes]]) -> None:
+	async def _on_llm_event(self, conversation: Conversation, exchange: Exchange, event_data: bytes) -> None:
 		event = {} 
-		for event_type, event_data in event_items:
-			match event_type:
-				case 'data':
-					event['data'] = event_data
-				case 'event':
-					event['type'] = event_data
-				case _:
-					L.warning("Unknown event item type", struct_data={"event_item_type": event_type})
-					pass
+		for event_line in event_data.split(b'\n'):
+			if event_line.startswith(b'event: '):
+				event['type'] = event_line[7:].decode("utf-8")
+			elif event_line.startswith(b'data: '):
+				event['data'] = json.loads(event_line[6:])
+			else:
+				L.warning("Unknown event line", struct_data={"event_line": event_line})
+				continue
 
 		match event.get('type', "???"):
 

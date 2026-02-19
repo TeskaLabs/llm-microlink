@@ -24,6 +24,7 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 		self.APIKey = kwargs.get('api_key', None)
 		self.Semaphore = asyncio.Semaphore(2)
 
+
 	def prepare_headers(self):
 		headers = {
 			'Content-Type': 'application/json',
@@ -85,7 +86,7 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 
 		data = {
 			"model": model,
-			"system": conversation.instructions,
+			"system": "\n".join(conversation.instructions),
 			"messages": messages,
 			"max_tokens": 4096,
 			"stream": True,
@@ -108,10 +109,6 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 					return
 
 				assert response.content_type == "text/event-stream"
-
-				# State for tracking content blocks
-				self._current_content_block = None
-				self._current_content_block_index = None
 
 				async for line in response.content:
 					line = line.decode("utf-8").rstrip('\n\r')
@@ -172,7 +169,7 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				#   "index": 0,
 				#   "content_block": {"type": "tool_use", "id": "...", "name": "...", "input": ""}
 				# }
-				self._current_content_block_index = data.get('index')
+				index = data.get('index')
 				content_block = data.get('content_block', {})
 				block_type = content_block.get('type')
 
@@ -183,12 +180,14 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 							role='assistant',
 							content=content_block.get('text', ''),
 							status='in_progress',
+							index=index,
 						)
 
 					case 'thinking':
 						item = AssistentReasoning(
 							content=content_block.get('thinking', ''),
 							status='in_progress',
+							index=index,
 						)
 
 					case 'tool_use':
@@ -197,13 +196,13 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 							name=content_block.get('name', ''),
 							arguments='',
 							status='in_progress',
+							index=index,
 						)
 
 					case _:
 						L.warning("Unknown content block type", struct_data={"type": block_type})
 
 				if item is not None:
-					self._current_content_block = item
 					exchange.items.append(item)
 					await self.LLMChatService.send_update(conversation, {
 						"type": "item.appended",
@@ -230,8 +229,10 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				# }
 				delta = data.get('delta', {})
 				delta_type = delta.get('type')
+				index = data.get('index')
+				assert index is not None
 
-				item = self._current_content_block
+				item = self._get_item_by_index(exchange, index)
 				if item is None:
 					L.warning("Received delta without active content block")
 					return
@@ -270,7 +271,9 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				#   "type": "content_block_stop",
 				#   "index": 0
 				# }
-				item = self._current_content_block
+				index = data.get('index')
+				assert index is not None
+				item = self._get_item_by_index(exchange, index)
 				if item is not None:
 					item.status = 'completed'
 					await self.LLMChatService.send_update(conversation, {
@@ -280,9 +283,6 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 
 					if isinstance(item, FunctionCall):
 						await self.LLMChatService.create_function_call(conversation, exchange, item)
-
-				self._current_content_block = None
-				self._current_content_block_index = None
 
 			case 'message_delta':
 				# {
@@ -307,6 +307,13 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 
 			case _:
 				L.warning("Unknown/unhandled event", struct_data={"type": event_type})
+
+
+	def _get_item_by_index(self, exchange: Exchange, index: int) -> AssistentMessage|AssistentReasoning|FunctionCall|None:
+		for item in exchange.items:
+			if hasattr(item, 'index') and item.index == index:
+				return item
+		return None
 
 
 	def _build_tools(self, conversation: Conversation) -> list[dict]:

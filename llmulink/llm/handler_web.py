@@ -72,7 +72,7 @@ class LLMWebHandler():
 							match data.get('type'):
 
 								case 'user.message.created':
-									user_message = UserMessage(role='user', content=data.get('content', ''), model=data.get('model', models[0]))
+									user_message = UserMessage(role='user', content=data.get('content', ''), model=data.get('model', models[0].get('id', '?')))
 									await self.LLMRouterService.create_exchange(conversation, user_message)
 
 								case 'conversation.stop':

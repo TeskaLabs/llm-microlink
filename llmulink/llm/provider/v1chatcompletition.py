@@ -6,6 +6,7 @@ import aiohttp
 
 import asab
 
+from ..models import measure_tokens_vllm
 from ..datamodel import Conversation, Exchange, AssistentMessage, AssistentReasoning, FunctionCall
 from .provider_abc import LLMChatProviderABC
 
@@ -37,10 +38,10 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 		messages = []
 
 		# Add system message if instructions are provided
-		if conversation.instructions:
+		for instruction in conversation.instructions:
 			messages.append({
 				"role": "system",
-				"content": conversation.instructions,
+				"content": instruction,
 			})
 
 		for exch in conversation.exchanges:
@@ -107,17 +108,9 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 		async with aiohttp.ClientSession(headers=self.prepare_headers()) as session:
 
 			# vLLM tokenize endpoint
-			async with session.post(self.URL + "tokenize", json=data, timeout=60*10) as response:
-				if response.status == 200:
-					token_count = await response.json()
-					await self.LLMChatService.send_update(conversation, {
-						"type": "chat.tokens",
-						"token_count": token_count.get('count'),
-						"token_max": token_count.get('max_model_len'),
-					})
+			await measure_tokens_vllm(self.LLMChatService, session, self.URL, data, conversation)
 
-
-			async with session.post(self.URL + "v1/chat/completions", json=data, timeout=60*10) as response:
+			async with session.post(self.URL + "v1/chat/completions", json=data, timeout=60*30) as response:
 				if response.status != 200:
 					text = await response.text()
 					L.error(

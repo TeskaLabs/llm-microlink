@@ -1,0 +1,6 @@
+define:
+  type: llm/skill
+
+instructions:
+  - +prompt.md
+  - +ECS.yaml

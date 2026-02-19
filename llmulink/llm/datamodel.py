@@ -121,7 +121,7 @@ class Exchange(pydantic.BaseModel):
 class Conversation(pydantic.BaseModel):
 	"""A complete conversation."""
 	conversation_id: str
-	instructions: str
+	instructions: list[str] = pydantic.Field(default_factory=list)
 	tools: list[FunctionCallTool] = pydantic.Field(default_factory=list)
 	created_at: datetime.datetime = pydantic.Field(default_factory=_utc_now)
 
