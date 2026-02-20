@@ -22,9 +22,9 @@ class LocalToolProvider(ToolProviderABC):
 				parameters = {
 					"type": "object",
 					"properties": {
-						"target": {
+						"host": {
 							"type": "string",
-							"description": "The fully qualified hostname or IP address to ping"
+							"description": "The hostname or IP address to ping"
 						}
 					},
 					"required": ["host"]

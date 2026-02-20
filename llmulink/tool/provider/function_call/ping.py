@@ -7,10 +7,10 @@ L = logging.getLogger(__name__)
 
 async def fuction_call_ping(function_call) -> None:
 	"""
-	Ping a target host or service to check if it's reachable.
+	Ping a hostname or IP address to check if it's reachable.
 	
 	Args:
-		target: The target host or service to ping
+		host: The hostname or IP address to ping
 		reply: Async callback to submit JSON chunks to the webui client
 	
 	Returns:
@@ -26,9 +26,9 @@ async def fuction_call_ping(function_call) -> None:
 		function_call.error = True
 		return
 
-	target = arguments.get("target")
+	target = arguments.get("host")
 	if not target:
-		function_call.content = "Parameter 'target' is required"
+		function_call.content = "Parameter 'host' is required"
 		function_call.error = True
 		return
 
@@ -39,7 +39,7 @@ async def fuction_call_ping(function_call) -> None:
 	)
 	
 	if not sanitized_target:
-		function_call.content = "Invalid paramater 'target' specified"
+		function_call.content = "Invalid paramater 'host' specified"
 		function_call.error = True
 		return
 	

@@ -69,7 +69,7 @@ class LLMRouterService(asab.Service):
 			case "arcee-ai/Trinity-Large-Preview-FP8":
 				return LLMChatProviderV1ChatCompletition(self, **config)
 			case "stepfun-ai/Step-3.5-Flash" | "stepfun-ai/Step-3.5-Flash-FP8":
-				return LLMChatProviderV1Response(self, **config)
+				return LLMChatProviderV1ChatCompletition(self, **config)
 			case "mistralai/Devstral-2-123B-Instruct-2512":
 				return LLMChatProviderV1ChatCompletition(self, **config)
 			case "openai/gpt-oss-120b" | "openai/gpt-oss-20b":

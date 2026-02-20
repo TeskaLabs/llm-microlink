@@ -1,4 +1,3 @@
-from asyncio import Task
 import uuid
 import typing
 import datetime
@@ -16,7 +15,7 @@ def _utc_now() -> datetime.datetime:
 class AssistentReasoning(pydantic.BaseModel):
 	"""Reasoning block from the LLM response."""
 	content: str
-	status: str
+	status: typing.Literal['in_progress', 'completed']
 	index: int = None  # LLMChatProviderV1Messages is using this index to identify the content block
 	key: str = pydantic.Field(default_factory=lambda: "reasoning-{}".format(str(uuid.uuid4())))
 	type: typing.Literal['reasoning'] = 'reasoning'
@@ -35,7 +34,7 @@ class AssistentReasoning(pydantic.BaseModel):
 class AssistentMessage(pydantic.BaseModel):
 	"""Message block from the LLM response."""
 	content: str
-	status: str
+	status: typing.Literal['in_progress', 'completed']
 	role: str
 	index: int = None  # LLMChatProviderV1Messages is using this index to identify the content block
 	key: str = pydantic.Field(default_factory=lambda: "message-{}".format(str(uuid.uuid4())))
@@ -78,7 +77,7 @@ class FunctionCall(pydantic.BaseModel):
 	call_id: str
 	name: str
 	arguments: str
-	status: str
+	status: typing.Literal['in_progress', 'completed', 'executing', 'finished']
 	content: str = ''
 	error: bool = False
 	index: int = None  # LLMChatProviderV1ChatCompletition and LLMChatProviderV1Messages are using this index to identify the tool call
@@ -111,9 +110,17 @@ class Exchange(pydantic.BaseModel):
 	items: list[UserMessage|AssistentReasoning|AssistentMessage|FunctionCall] = pydantic.Field(default_factory=list)
 	completed: bool = False
 
-	def get_last_item(self, item_type: typing.Literal['message', 'reasoning', 'function_call']) -> UserMessage|AssistentReasoning|FunctionCall:
+	def get_last_item(self, item_type: typing.Literal['message', 'reasoning', 'function_call'], status: typing.Literal['in_progress', 'completed'] = None) -> UserMessage|AssistentReasoning|FunctionCall:
 		for item in reversed(self.items):
 			if item.type == item_type:
+				if status is not None and item.status != status:
+					continue
+				return item
+		return None
+
+	def get_last_assistant_message(self, status: typing.Literal['in_progress', 'completed'] = 'in_progress') -> UserMessage|AssistentMessage:
+		for item in reversed(self.items):
+			if isinstance(item, AssistentMessage) and item.status == status:
 				return item
 		return None
 
