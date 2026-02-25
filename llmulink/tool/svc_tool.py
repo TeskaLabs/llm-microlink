@@ -27,24 +27,25 @@ class ToolService(asab.Service):
 			self.Providers.append(ZookeeperToolProvider(self))
 
 
-	def get_tools(self) -> list[FunctionCallTool]:
-		ret = list()
+	async def locate_tool(self, name) -> FunctionCallTool:
 		for provider in self.Providers:
-			try:
-				tools = provider.get_tools()
-				ret.extend(tools)
-			except Exception as e:
-				L.exception("Error getting tools from provider", struct_data={"provider": provider.Id})
-		return ret
-
-
-	async def execute(self, function_call) -> typing.AsyncGenerator[typing.Any, None]:
-		tool = None
-		for provider in self.Providers:
-			tool = provider.get_tool(function_call)
+			tool = await provider.locate_tool(name)
 			if tool is not None:
-				break
-		
+				return tool
+		return None
+
+
+	async def ensure_init(self, conversation):
+		uninitialized_tools = set(conversation.tools.keys()) - conversation.tool_initialized
+		for tool_name in uninitialized_tools:
+			tool = conversation.tools[tool_name]
+			if tool.init_call is not None:
+				await tool.init_call(self.App, conversation)
+			conversation.tool_initialized.add(tool_name)
+
+
+	async def execute(self, conversation, function_call) -> typing.AsyncGenerator[typing.Any, None]:
+		tool = conversation.tools.get(function_call.name)		
 		if tool is None:
 			function_call.content = "Tool not found"
 			function_call.error = True
@@ -53,7 +54,7 @@ class ToolService(asab.Service):
 			return
 
 		try:
-			async for result in tool.function_call(function_call):
+			async for result in tool.function_call(conversation,function_call):
 				yield result
 			function_call.status = 'completed'
 		except Exception:

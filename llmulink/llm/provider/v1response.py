@@ -14,7 +14,7 @@ L = logging.getLogger(__name__)
 
 class LLMChatProviderV1Response(LLMChatProviderABC):
 	'''
-	OpenAI API v1 responses adapter.
+	OpenAI API v1 responses adapter (new).
 
 	https://platform.openai.com/docs/api-reference/responses
 	'''
@@ -382,7 +382,14 @@ class LLMChatProviderV1Response(LLMChatProviderABC):
 				pass
 
 			case 'response.function_call_arguments.delta':
-				pass
+				item = exchange.get_last_item('function_call')
+				if item is not None:
+					item.arguments += event['data']['delta']
+					await self.LLMChatService.send_update(conversation, {
+						"type": "item.arguments.delta",
+						"key": item.key,
+						"arguments": event['data']['delta'],
+					})
 
 			case 'response.function_call_arguments.done':
 				# {
@@ -431,10 +438,10 @@ class LLMChatProviderV1Response(LLMChatProviderABC):
 			]
 		'''
 		tools = []
-		for tool in conversation.tools:
+		for tool_name, tool in conversation.tools.items():
 			tools.append({
 				"type": "function",  # This should always be function
-				"name": tool.name,  # The function's name (e.g. get_weather)
+				"name": tool_name,  # The function's name (e.g. get_weather)
 				"description": tool.description,  # Details on when and how to use the function
 				"parameters": tool.parameters,  # JSON schema defining the function's input arguments
 			})

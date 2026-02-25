@@ -6,6 +6,7 @@ import aiohttp
 
 import asab
 
+from ..models import measure_tokens_vllm
 from ..datamodel import Conversation, Exchange, AssistentMessage, AssistentReasoning, FunctionCall
 from .provider_abc import LLMChatProviderABC
 
@@ -19,10 +20,11 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 	https://platform.claude.com/docs/en/api/messages/create
 	'''
 
-	def __init__(self, service, *, url, **kwargs):
+	def __init__(self, service, *, url, max_model_len=None, **kwargs):
 		super().__init__(service, url=url)
 		self.APIKey = kwargs.get('api_key', None)
 		self.Semaphore = asyncio.Semaphore(2)
+		self.MaxModelLen = max_model_len
 
 
 	def prepare_headers(self):
@@ -88,8 +90,12 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 			"model": model,
 			"system": "\n".join(conversation.instructions),
 			"messages": messages,
-			"max_tokens": 4096,
+			"max_tokens": 40*1024,
 			"stream": True,
+			"thinking": {
+				"type": "enabled",
+				"budget_tokens": 10000,   # Antropic API requires a budget for thinking
+			},
 		}
 
 		tools = self._build_tools(conversation)	
@@ -99,6 +105,13 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 		L.log(asab.LOG_NOTICE, "Sending request to LLM", struct_data={"conversation_id": conversation.conversation_id, "model": model, "provider": self.URL})
 
 		async with aiohttp.ClientSession(headers=self.prepare_headers()) as session:
+
+			# vLLM tokenize endpoint
+			if self.MaxModelLen is None:
+				# The Anthropic API is measuring tokens internally, so we don't need to measure them here,
+				# if max model length was provided
+				await measure_tokens_vllm(self.LLMChatService, session, self.URL, data, conversation)
+
 			async with session.post(self.URL + "v1/messages", json=data) as response:
 				if response.status != 200:
 					text = await response.text()
@@ -149,7 +162,32 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				#     "usage": {"input_tokens": 25, "output_tokens": 1}
 				#   }
 				# }
+				input_tokens = data.get('message', {}).get('usage', {}).get('input_tokens', None)
+				if input_tokens is not None:
+					await self.LLMChatService.send_update(conversation, {
+						"type": "chat.tokens",
+						"token_count": input_tokens,
+						"token_max": self.MaxModelLen,
+					})
+
+			case 'message_delta':
+				# {
+				#   "type": "message_delta",
+				#   "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+				#   "usage": {"input_tokens": 25, "output_tokens": 15}
+				# }
+				input_tokens = data.get('message', {}).get('usage', {}).get('input_tokens', None)
+				if input_tokens is not None:
+					await self.LLMChatService.send_update(conversation, {
+						"type": "chat.tokens",
+						"token_count": input_tokens,
+						"token_max": self.MaxModelLen,
+					})
+
+			case 'message_stop':
+				# {"type": "message_stop"}
 				pass
+
 
 			case 'content_block_start':
 				# {
@@ -284,18 +322,6 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 					if isinstance(item, FunctionCall):
 						await self.LLMChatService.create_function_call(conversation, exchange, item)
 
-			case 'message_delta':
-				# {
-				#   "type": "message_delta",
-				#   "delta": {"stop_reason": "end_turn", "stop_sequence": null},
-				#   "usage": {"output_tokens": 15}
-				# }
-				pass
-
-			case 'message_stop':
-				# {"type": "message_stop"}
-				pass
-
 			case 'ping':
 				# Keepalive event
 				pass
@@ -321,9 +347,9 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 		https://platform.claude.com/docs/en/api/messages/create
 		'''
 		tools = []
-		for tool in conversation.tools:
+		for tool_name, tool in conversation.tools.items():
 			tools.append({
-				"name": tool.name,  # Name of the tool.
+				"name": tool_name,  # Name of the tool.
 				"description": tool.description,  # Optional, but strongly-recommended description of the tool.
 				"input_schema": tool.parameters,  # JSON schema defining the tool's input arguments.
 			})

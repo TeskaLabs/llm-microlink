@@ -16,7 +16,7 @@ L = logging.getLogger(__name__)
 
 class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 	'''
-	OpenAI API v1 chat completions adapter.
+	OpenAI API v1 chat completions adapter (old).
 
 	https://platform.openai.com/docs/api-reference/chat/create
 	'''
@@ -36,14 +36,11 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 
 
 	async def chat_request(self, conversation: Conversation, exchange: Exchange) -> None:
-		messages = []
-
 		# Add system message if instructions are provided
-		for instruction in conversation.instructions:
-			messages.append({
-				"role": "system",
-				"content": instruction,
-			})
+		messages = [{
+			"role": "system",
+			"content": "\n".join(conversation.instructions),
+		}]
 
 		for exch in conversation.exchanges:
 			for item in exch.items:
@@ -168,6 +165,7 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 
 		choice = choices[0]
 		delta = choice.get('delta', {})
+
 		finish_reason = choice.get('finish_reason')
 
 		if delta.get('role', None) == 'assistant' and delta.get('content', None) == '':
@@ -177,6 +175,8 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 		# Handle text content delta
 		content = delta.get('content', None)
 		if content is not None:
+			await self._ensure_reasoning_completed(conversation, exchange)
+
 			item = exchange.get_last_assistant_message('in_progress')
 			if item is None:
 				item = AssistentMessage(
@@ -222,6 +222,8 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 		# Handle tool calls delta
 		tool_calls = delta.get('tool_calls', None)
 		if tool_calls is not None:
+			await self._ensure_reasoning_completed(conversation, exchange)
+
 			for tool_call_delta in tool_calls:
 				tool_index = tool_call_delta.get('index')
 				assert tool_index is not None
@@ -246,12 +248,18 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 						"type": "item.appended",
 						"item": item.to_dict(),
 					})
+
 				elif len(tool_calls_filtered) == 1:
 					# Update existing tool call with more arguments
 					item = tool_calls_filtered[0]
 					function_info = tool_call_delta.get('function', {})
 					if 'arguments' in function_info:
-						item.arguments += function_info['arguments']
+						if finish_reason is None:
+							item.arguments += function_info['arguments']
+						else:
+							# This is from testing of zai-org/GLM-4.7-FP8
+							# It seems that the arguments are not streamed, but rather sent all at once in the finish reason message
+							item.arguments = function_info['arguments']
 						await self.LLMChatService.send_update(conversation, {
 							"type": "item.arguments.delta",
 							"key": item.key,
@@ -263,10 +271,12 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 
 		# Handle finish reason
 		if finish_reason is not None:
+			await self._ensure_reasoning_completed(conversation, exchange)
+
 			if finish_reason == 'stop':
 				# Normal completion
-				item = exchange.get_last_item('message', status='in_progress')
-				if item is not None and isinstance(item, AssistentMessage):
+				item = exchange.get_last_assistant_message(status='in_progress')
+				if item is not None:
 					item.status = 'completed'
 					await self.LLMChatService.send_update(conversation, {
 						"type": "item.updated",
@@ -291,6 +301,18 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 			else:
 				L.warning("Unknown finish reason", struct_data={"finish_reason": finish_reason})
 
+
+	async def _ensure_reasoning_completed(self, conversation: Conversation, exchange: Exchange) -> None:
+		'''
+		Ensure that the reasoning item is completed.
+		'''
+		reasoning = exchange.get_last_item('reasoning', status='in_progress')
+		if reasoning is not None:
+			reasoning.status = 'completed'
+			await self.LLMChatService.send_update(conversation, {
+				"type": "item.updated", 
+				"item": reasoning.to_dict(),
+			})
 
 	async def _finalize_stream(self, conversation: Conversation, exchange: Exchange) -> None:
 		'''
@@ -342,11 +364,11 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 		}
 		'''
 		tools = []
-		for tool in conversation.tools:
+		for tool_name, tool in conversation.tools.items():
 			tools.append({
 				"type": "function",
 				"function": {
-					"name": tool.name,
+					"name": tool_name,
 					"description": tool.description,
 					"parameters": tool.parameters,
 				}

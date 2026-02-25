@@ -2,10 +2,11 @@ import json
 import logging
 import asyncio
 
+from ...tool import FunctionCallTool
 
 L = logging.getLogger(__name__)
 
-async def fuction_call_ping(function_call) -> None:
+async def fuction_call_ping(conversation, function_call) -> None:
 	"""
 	Ping a hostname or IP address to check if it's reachable.
 	
@@ -94,3 +95,21 @@ async def fuction_call_ping(function_call) -> None:
 		L.exception("Exception occurred while executing ping", struct_data={"error": str(e)})
 		function_call.content = "Exception occurred while executing command 'ping'"
 		function_call.error = True
+
+
+ping_tool = FunctionCallTool(
+	name = "ping",
+	title = "Ping a host",
+	description = "Ping a host and return the result",
+	parameters = {
+		"type": "object",
+		"properties": {
+			"host": {
+				"type": "string",
+				"description": "The hostname or IP address to ping"
+			}
+		},
+		"required": ["host"]
+	},
+	function_call = fuction_call_ping
+)

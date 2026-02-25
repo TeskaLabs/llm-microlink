@@ -5,21 +5,6 @@ instructions:
   - +prompt.md
 
 tools:
-  compile_parser:
-    title: Compile the parser
-    description: |
-      This tool compiles the parser written in Go.
-      The tool will return the result of the compilation, stdout and stderr of the Go compiler.
-
-    parameters: {
-      "type": "object",
-      "properties": {
-        "code": {
-          "type": "string",
-          "description": "The Go code of the parser"
-        }
-      },
-      "required": [
-        "code"
-      ]
-    }
+  - compile_parser
+  - test_parser
+  - busybox

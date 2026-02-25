@@ -129,7 +129,10 @@ class Conversation(pydantic.BaseModel):
 	"""A complete conversation."""
 	conversation_id: str
 	instructions: list[str] = pydantic.Field(default_factory=list)
-	tools: list[FunctionCallTool] = pydantic.Field(default_factory=list)
+	
+	tools: dict[str, FunctionCallTool] = pydantic.Field(default_factory=dict) # name -> tool
+	tool_initialized: set[str] = pydantic.Field(default_factory=set)
+
 	created_at: datetime.datetime = pydantic.Field(default_factory=_utc_now)
 
 	exchanges: list[Exchange] = pydantic.Field(default_factory=list)
@@ -138,6 +141,8 @@ class Conversation(pydantic.BaseModel):
 		
 	tasks: list[typing.Callable] = pydantic.Field(default_factory=list)
 	loop_break: bool = True  # If true, then a LLMService will break an agentic loop and wait for the next user message
+
+	sandbox: object = None
 
 
 	def get_model(self) -> str | None:
