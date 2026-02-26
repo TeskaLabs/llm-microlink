@@ -60,9 +60,17 @@ func validateType(key string, value interface{}, schemaType string) error {
 	// Array types: [str], [ip], [mac], [geopoint], [ui64]
 	if strings.HasPrefix(schemaType, "[") && strings.HasSuffix(schemaType, "]") {
 		elemType := schemaType[1 : len(schemaType)-1]
-		arr, ok := value.([]interface{})
-		if !ok {
-			return fmt.Errorf("field %q: expected array for type %q, got %T", key, schemaType, value)
+		var arr []interface{}
+		switch v := value.(type) {
+			case []interface{}:
+				arr = v
+			case []string:
+				arr = make([]interface{}, len(v))
+				for i, s := range v {
+					arr[i] = s
+				}
+			default:
+				return fmt.Errorf("field %q: expected array for type %q, got %T", key, schemaType, value)
 		}
 		for i, elem := range arr {
 			if err := validateScalarType(fmt.Sprintf("%s[%d]", key, i), elem, elemType); err != nil {
@@ -93,33 +101,41 @@ func validateType(key string, value interface{}, schemaType string) error {
 
 func validateScalarType(key string, value interface{}, schemaType string) error {
 	switch schemaType {
-	case "str", "datetime", "ip", "mac", "geopoint", "text":
-		if _, ok := value.(string); !ok {
-			return fmt.Errorf("field %q: expected string for type %q, got %T", key, schemaType, value)
-		}
-	case "bool":
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("field %q: expected bool, got %T", key, value)
-		}
-	case "ui8", "ui16", "ui64", "si32", "si64", "fp16", "fp32", "fp64":
-		if !isNumeric(value) {
-			return fmt.Errorf("field %q: expected numeric for type %q, got %T", key, schemaType, value)
-		}
-	default:
-		return fmt.Errorf("field %q: unsupported schema type %q", key, schemaType)
+		case "str", "datetime", "ip", "mac", "text":
+			if _, ok := value.(string); !ok {
+				return fmt.Errorf("field %q: expected string for type %q, got %T", key, schemaType, value)
+			}
+		case "bool":
+			if _, ok := value.(bool); !ok {
+				return fmt.Errorf("field %q: expected bool, got %T", key, value)
+			}
+		case "ui8", "ui16", "ui32", "ui64", "ui128", "si8", "si16", "si32", "si64", "si128":
+			if !isNumeric(value) {
+				return fmt.Errorf("field %q: expected numeric for type %q, got %T", key, schemaType, value)
+			}
+			if strings.HasPrefix(schemaType, "ui") {
+				// Unsigned numeric cannot be negative
+				if value.(int) < 0 {
+					return fmt.Errorf("field %q: expected unsigned numeric for type %q, got %T", key, schemaType, value)
+				}
+			}
+		case "fp32", "fp64", "fp128":
+			if _, ok := value.(float64); !ok {
+				return fmt.Errorf("field %q: expected float64 for type %q, got %T", key, schemaType, value)
+			}
+		default:
+			return fmt.Errorf("field %q: unsupported schema type %q", key, schemaType)
 	}
 	return nil
 }
 
 func isNumeric(v interface{}) bool {
 	switch v.(type) {
-	case int, int8, int16, int32, int64:
-		return true
-	case uint, uint8, uint16, uint32, uint64:
-		return true
-	case float32, float64:
-		return true
-	default:
-		return false
+		case int, int8, int16, int32, int64:
+			return true
+		case uint, uint8, uint16, uint32, uint64:
+			return true
+		default:
+			return false
 	}
 }
