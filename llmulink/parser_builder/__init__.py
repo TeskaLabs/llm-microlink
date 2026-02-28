@@ -10,12 +10,11 @@ async def init_parser_builder(app, conversation):
 	input_params_logs = "unify"
 
 	await app.SandboxService.init_sandbox(conversation)
+	assert conversation.sandbox is not None, "Sandbox is not initialized"
 
-	os.makedirs(os.path.join(conversation.sandbox.path, "log"), exist_ok=True)
-
+	os.makedirs(os.path.join(conversation.sandbox.Path, "log"), exist_ok=True)
 
 	# Load the schema
-
 	with open(os.path.join(MY_DIR, "schema", "{}.yaml".format(input_params_schema)), "r") as f:
 		schema_obj = yaml.safe_load(f)
 
@@ -36,7 +35,7 @@ async def init_parser_builder(app, conversation):
 	# Also copy the schema to the sandbox
 	shutil.copy(
 		os.path.join(MY_DIR, "schema", "{}.yaml".format(input_params_schema)),
-		os.path.join(conversation.sandbox.path, "{}.yaml".format(input_params_schema))
+		os.path.join(conversation.sandbox.Path, "{}.yaml".format(input_params_schema))
 	)
 
 
@@ -49,10 +48,10 @@ async def init_parser_builder(app, conversation):
 		if file.endswith(".log"):
 			shutil.copy(
 				os.path.join(srcdir, file),
-				os.path.join(conversation.sandbox.path, "log")
+				os.path.join(conversation.sandbox.Path, "log")
 			)
 
-			sample_logs += f"log/{file}:\n"
+			sample_logs += f"`/sandbox/log/{file}`:\n"
 			sample_logs += open(os.path.join(srcdir, file), "r").read()
 			sample_logs += "\n\n"
 

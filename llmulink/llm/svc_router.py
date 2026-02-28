@@ -86,7 +86,7 @@ class LLMRouterService(asab.Service):
 				# https://platform.minimax.io/docs/api-reference/text-api
 				# reasoning-parser: minimax_m2
 				return LLMChatProviderV1Messages(self, max_model_len=max_model_len, **config)
-			case "Qwen/Qwen3.5-397B-A17B-FP8":
+			case "Qwen/Qwen3.5-397B-A17B-FP8" | "Qwen/Qwen3.5-122B-A10B" | "Qwen/Qwen3.5-35B-A3B":
 				return LLMChatProviderV1ChatCompletition(self, **config)
 			case "zai-org/GLM-4.7-FP8":
 				return LLMChatProviderV1ChatCompletition(self, **config)

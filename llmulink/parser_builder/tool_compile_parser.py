@@ -10,16 +10,23 @@ L = logging.getLogger(__name__)
 
 GO_PARSER_DIR = os.path.join(os.path.dirname(__file__), "go")
 
-async def execute(cmd, cwd, function_call):
+async def execute(cmd, cwd, function_call, *, stdin=None):
 	try:
-		# Create subprocess for ping command
-		# -c 4: send 4 packets
 		process = await asyncio.create_subprocess_exec(
 			*cmd,
 			stdout=asyncio.subprocess.PIPE,
 			stderr=asyncio.subprocess.PIPE,
+			stdin=asyncio.subprocess.PIPE if stdin is not None else None,
 			cwd=cwd,
+			env={
+				**os.environ,
+				"CGO_ENABLED": "0", # Disable CGO to avoid building with system libraries
+			},
 		)
+
+		if stdin is not None:
+			process.stdin.write(stdin.encode("utf-8"))
+			process.stdin.close()
 		
 		return_code = 0
 		pending = set([
@@ -49,13 +56,13 @@ async def execute(cmd, cwd, function_call):
 		yield f"return_code: {return_code}"
 
 	except FileNotFoundError:
-		L.warning("go compiler not found on this system")
-		function_call.content = "A command 'go compiler' was not found on this system"
+		L.warning("Command '{}' not found on this system".format(cmd[0]))
+		function_call.content = "A command '{}' was not found on this system".format(cmd[0])
 		function_call.error = True
 		
 	except Exception as e:
-		L.exception("Exception occurred while executing go compiler", struct_data={"error": str(e)})
-		function_call.content = "Exception occurred while executing command 'go compiler'"
+		L.exception("Exception occurred while executing command '{}'".format(cmd[0]), struct_data={"error": str(e)})
+		function_call.content = "Exception occurred while executing command '{}'".format(cmd[0])
 		function_call.error = True
 
 
@@ -77,7 +84,7 @@ async def fuction_call_compile_parser(conversation, function_call) -> None:
 		return
 
 	assert conversation.sandbox is not None, "Sandbox is not initialized"
-	trgdir = os.path.join(conversation.sandbox.path, "parser")
+	trgdir = os.path.join(conversation.sandbox.Path, "parser")
 	try:
 		shutil.copytree(GO_PARSER_DIR, trgdir, dirs_exist_ok=True)
 

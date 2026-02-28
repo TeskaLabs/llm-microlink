@@ -25,6 +25,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	fmt.Print("Input log:\n`")
+	fmt.Print(string(log))
+	fmt.Println("`\n")
+
 	result := Parse(log)
 	if result == nil || (len(result) == 0) {
 		fmt.Println("Parsing failed: result is empty")

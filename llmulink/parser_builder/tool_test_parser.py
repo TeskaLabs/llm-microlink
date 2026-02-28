@@ -1,63 +1,41 @@
 import os
 import logging
-import asyncio
 
 from ..tool.tool import FunctionCallTool
 
 L = logging.getLogger(__name__)
 
 
-async def execute(function_call, cmd, cwd):
-	process = await asyncio.create_subprocess_exec(
-		*cmd,
-		stdout=asyncio.subprocess.PIPE,
-		stderr=asyncio.subprocess.PIPE,
-		cwd=cwd,
-	)
-	
-	return_code = 0
-	pending = set([
-		asyncio.create_task(process.stdout.readline(), name="stdout"),
-		asyncio.create_task(process.stderr.readline(), name="stderr"),
-		asyncio.create_task(process.wait(), name="return_code"),
-	])
-	while len(pending) > 0:
-		done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-		for task in done:
-			match task.get_name():
-				
-				case "stdout" | "stderr":
-					data = task.result()
-					if len(data) > 0:
-						function_call.content += data.decode("utf-8", errors="replace")
-						yield "progress"
-
-						if task.get_name() == "stdout":
-							pending.add(asyncio.create_task(process.stdout.readline(), name="stdout"))
-						else:
-							pending.add(asyncio.create_task(process.stderr.readline(), name="stderr"))
-
-				case "return_code":
-					return_code = task.result()
-
-	if return_code != 0:
-		function_call.content += "\nExecution of the test (parser) failed with return code: " + str(return_code)	
-		function_call.error = True
-
-
 async def fuction_call_test_parser(conversation, function_call) -> None:
 	assert conversation.sandbox is not None, "Sandbox is not initialized"
 
-	for log_file in sorted(os.listdir(os.path.join(conversation.sandbox.path, "log"))):
+	for log_file in sorted(os.listdir(os.path.join(conversation.sandbox.Path, "log"))):
 		if not log_file.endswith(".log"):
 			continue
 
+		function_call.content += f"Test of `/sandbox/log/{log_file}`:\n"
+
 		yield "testing"
-		cmd = ["chroot", conversation.sandbox.path, "/parser/parse", "log/" + log_file, "./ECS.yaml"]
-		async for result in execute(function_call, cmd, conversation.sandbox.path):
-			yield result
-		
-		function_call.content += f"\nTest `{log_file}` completed.\n---\n"
+		return_code = None
+		cmd = ["/sandbox/parser/parse", "/sandbox/log/" + log_file, "/sandbox/ECS.yaml"]
+		async for r1, r2 in conversation.sandbox.execute(conversation, cmd):
+			match r1:
+				case "stdout":
+					function_call.content += r2
+				case "stderr":
+					function_call.content += r2
+				case "return_code":
+					return_code = r2
+			yield "progress"
+
+		if return_code != 0:
+			function_call.content += "\nTest failed with return code: " + str(return_code)	
+		else:
+			function_call.content += "\nTest completed successfully."
+
+		function_call.content += "\n---\n"
+
+	yield "completed"
 
 
 test_parser_tool = FunctionCallTool(

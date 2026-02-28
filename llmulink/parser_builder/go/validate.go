@@ -1,8 +1,10 @@
 package main
 
 import (
-	"fmt"
 	"os"
+	"fmt"
+	"net"
+	"time"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -49,6 +51,17 @@ func ValidateResult(result map[string]interface{}, schema *Schema) []string {
 		}
 	}
 
+
+	// Mandatory field @timestamp must be present
+	if _, ok := result["@timestamp"]; !ok {
+		errs = append(errs, "mandatory field @timestamp is missing")
+	}
+
+	// _id must not be present
+	if _, ok := result["_id"]; ok {
+		errs = append(errs, "field _id must not be present")
+	}
+
 	return errs
 }
 
@@ -64,6 +77,11 @@ func validateType(key string, value interface{}, schemaType string) error {
 		switch v := value.(type) {
 			case []interface{}:
 				arr = v
+			case []net.IP:
+				arr = make([]interface{}, len(v))
+				for i, ip := range v {
+					arr[i] = ip
+				}
 			case []string:
 				arr = make([]interface{}, len(v))
 				for i, s := range v {
@@ -73,7 +91,7 @@ func validateType(key string, value interface{}, schemaType string) error {
 				return fmt.Errorf("field %q: expected array for type %q, got %T", key, schemaType, value)
 		}
 		for i, elem := range arr {
-			if err := validateScalarType(fmt.Sprintf("%s[%d]", key, i), elem, elemType); err != nil {
+			if err := validateScalarType(fmt.Sprintf("%d of %s array", i, key), elem, elemType); err != nil {
 				return err
 			}
 		}
@@ -101,9 +119,17 @@ func validateType(key string, value interface{}, schemaType string) error {
 
 func validateScalarType(key string, value interface{}, schemaType string) error {
 	switch schemaType {
-		case "str", "datetime", "ip", "mac", "text":
+		case "str", "mac", "text":
 			if _, ok := value.(string); !ok {
 				return fmt.Errorf("field %q: expected string for type %q, got %T", key, schemaType, value)
+			}
+		case "ip":
+			if _, ok := value.(net.IP); !ok {
+				return fmt.Errorf("field %q: expected net.IP for type %q, got %T", key, schemaType, value)
+			}
+		case "datetime":
+			if _, ok := value.(time.Time); !ok {
+				return fmt.Errorf("field %q: expected time.Time for type %q, got %T", key, schemaType, value)
 			}
 		case "bool":
 			if _, ok := value.(bool); !ok {

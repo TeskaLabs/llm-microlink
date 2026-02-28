@@ -25,7 +25,7 @@ asab.Config.add_defaults({
 		"default": ["ping"],
 	},
 	"sandbox": {
-		"path": "./sandboxes",
+		"path": "/sandboxes",
 	},
 })
 

@@ -23,9 +23,9 @@ The output dictionary must be mapped into the schema, you must locate every fiel
 For each parsed field, look up the key in the schema to get its name and type.
 
 Step 3 - Compile a parser
-The parser must be a single Go file that you feed into a tool call `compile_parser`.
+The parser must be a single Go source file that you feed into a tool call `compile_parser`, existing parser source file can be also modified by `patch_parser` tool call.
 The `compile_parser` tool provides a function signature and other details; it will compile the Go parser and prepare it for execution.
-If the parser fails to compile, you will receive errors from Go compiler and you must fix it and retry the compilation (step 2 and step 3) until you are successful.
+If the parser fails to compile, you will receive errors from Go compiler and you must fix it (step 2 and step 3) until you are successful.
 
 Step 4 - Test a parser
 Test the parser by calling `test_parser` tool.
@@ -42,8 +42,9 @@ Parser is built succesfully.
 
 ## Generic rules
 
-- All timestamps, dates and times must be converted to UTC with millisecond precision
+- All timestamps, dates and times must be converted to UTC with millisecond precision; use `time.Time`
 - All strings must be in UTF-8
+- All IP addresses must be parsed into `net.IP`; use Go `net.ParseIP()` or similar
 - `@timestamp` is a mandatory timestamp that must be parsed from every log
 - Output is a flat key/value dictionary; nested keys must be converted to dot notation (e.g. `host.name`)
 - If some field (e.g. `message`) contains the relevant information such as IP address or username, extract this information as well by a subparser
