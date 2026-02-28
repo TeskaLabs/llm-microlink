@@ -6,15 +6,17 @@ import aiohttp
 
 import asab
 
+from ..models import measure_tokens_vllm
 from ..datamodel import Conversation, Exchange, AssistentMessage, AssistentReasoning, FunctionCall
 from .provider_abc import LLMChatProviderABC
+
 
 L = logging.getLogger(__name__)
 
 
 class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 	'''
-	OpenAI API v1 chat completions adapter.
+	OpenAI API v1 chat completions adapter (old).
 
 	https://platform.openai.com/docs/api-reference/chat/create
 	'''
@@ -34,14 +36,11 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 
 
 	async def chat_request(self, conversation: Conversation, exchange: Exchange) -> None:
-		messages = []
-
 		# Add system message if instructions are provided
-		if conversation.instructions:
-			messages.append({
-				"role": "system",
-				"content": conversation.instructions,
-			})
+		messages = [{
+			"role": "system",
+			"content": "\n".join(conversation.instructions),
+		}]
 
 		for exch in conversation.exchanges:
 			for item in exch.items:
@@ -93,6 +92,9 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 			"model": model,
 			"messages": messages,
 			"stream": True,
+			"stream_options": {
+				"include_usage": True,
+			},
 		}
 
 		tools = self._build_tools(conversation)
@@ -101,12 +103,12 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 
 		L.log(asab.LOG_NOTICE, "Sending request to LLM", struct_data={"conversation_id": conversation.conversation_id, "model": model, "provider": self.URL})
 
-		# State for tracking streaming content
-		self._current_assistant_message = None
-		self._current_tool_calls = {}  # Indexed by tool call index
-
 		async with aiohttp.ClientSession(headers=self.prepare_headers()) as session:
-			async with session.post(self.URL + "v1/chat/completions", json=data, timeout=60*10) as response:
+
+			# vLLM tokenize endpoint
+			await measure_tokens_vllm(self.LLMChatService, session, self.URL, data, conversation)
+
+			async with session.post(self.URL + "v1/chat/completions", json=data, timeout=60*30) as response:
 				if response.status != 200:
 					text = await response.text()
 					L.error(
@@ -163,43 +165,71 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 
 		choice = choices[0]
 		delta = choice.get('delta', {})
+
 		finish_reason = choice.get('finish_reason')
 
-		# Handle role initialization
-		if 'role' in delta and delta['role'] == 'assistant':
-			# Start of assistant response - may or may not have content yet
-			pass
+		if delta.get('role', None) == 'assistant' and delta.get('content', None) == '':
+			# This is some kind of initialization message, ignore it
+			return
 
 		# Handle text content delta
-		if 'content' in delta and delta['content'] is not None:
-			text = delta['content']
-			if self._current_assistant_message is None:
-				# Create new assistant message item
-				self._current_assistant_message = AssistentMessage(
+		content = delta.get('content', None)
+		if content is not None:
+			await self._ensure_reasoning_completed(conversation, exchange)
+
+			item = exchange.get_last_assistant_message('in_progress')
+			if item is None:
+				item = AssistentMessage(
 					role='assistant',
-					content=text,
+					content='',
 					status='in_progress',
 				)
-				exchange.items.append(self._current_assistant_message)
+				exchange.items.append(item)
 				await self.LLMChatService.send_update(conversation, {
 					"type": "item.appended",
-					"item": self._current_assistant_message.to_dict(),
+					"item": item.to_dict(),
 				})
-			else:
-				# Append to existing message
-				self._current_assistant_message.content += text
+			item.content += content
+			await self.LLMChatService.send_update(conversation, {
+				"type": "item.delta",
+				"key": item.key,
+				"delta": content,
+			})
+
+		# Handle reasoning delta
+		reasoning = delta.get('reasoning', None)
+		if reasoning is not None:
+			item = exchange.get_last_item('reasoning', status='in_progress')
+			if item is None:
+				item = AssistentReasoning(
+					content='',
+					status='in_progress',
+				)
+				exchange.items.append(item)
 				await self.LLMChatService.send_update(conversation, {
-					"type": "item.delta",
-					"key": self._current_assistant_message.key,
-					"delta": text,
+					"type": "item.appended",
+					"item": item.to_dict(),
 				})
+			assert isinstance(item, AssistentReasoning)
+			assert item.status == 'in_progress'
+			item.content += reasoning
+			await self.LLMChatService.send_update(conversation, {
+				"type": "item.delta",
+				"key": item.key,
+				"delta": reasoning,
+			})
 
 		# Handle tool calls delta
-		if 'tool_calls' in delta:
-			for tool_call_delta in delta['tool_calls']:
-				index = tool_call_delta.get('index', 0)
+		tool_calls = delta.get('tool_calls', None)
+		if tool_calls is not None:
+			await self._ensure_reasoning_completed(conversation, exchange)
 
-				if index not in self._current_tool_calls:
+			for tool_call_delta in tool_calls:
+				tool_index = tool_call_delta.get('index')
+				assert tool_index is not None
+				
+				tool_calls_filtered = [*filter(lambda item: isinstance(item, FunctionCall) and item.index == tool_index, exchange.items)]
+				if len(tool_calls_filtered) == 0:
 					# New tool call
 					tool_call_id = tool_call_delta.get('id', '')
 					function_info = tool_call_delta.get('function', {})
@@ -211,57 +241,56 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 						name=function_name,
 						arguments=arguments,
 						status='in_progress',
+						index=tool_index,
 					)
-					self._current_tool_calls[index] = item
 					exchange.items.append(item)
 					await self.LLMChatService.send_update(conversation, {
 						"type": "item.appended",
 						"item": item.to_dict(),
 					})
-				else:
+
+				elif len(tool_calls_filtered) == 1:
 					# Update existing tool call with more arguments
-					item = self._current_tool_calls[index]
+					item = tool_calls_filtered[0]
 					function_info = tool_call_delta.get('function', {})
 					if 'arguments' in function_info:
-						item.arguments += function_info['arguments']
+						if finish_reason is None:
+							item.arguments += function_info['arguments']
+						else:
+							# This is from testing of zai-org/GLM-4.7-FP8
+							# It seems that the arguments are not streamed, but rather sent all at once in the finish reason message
+							item.arguments = function_info['arguments']
+						await self.LLMChatService.send_update(conversation, {
+							"type": "item.arguments.delta",
+							"key": item.key,
+							"arguments": function_info['arguments'],
+						})
+
+				else:
+					raise RuntimeError("Multiple tool calls with the same ID found")
 
 		# Handle finish reason
 		if finish_reason is not None:
+			await self._ensure_reasoning_completed(conversation, exchange)
+
 			if finish_reason == 'stop':
 				# Normal completion
-				if self._current_assistant_message is not None:
-					self._current_assistant_message.status = 'completed'
-					await self.LLMChatService.send_update(conversation, {
-						"type": "item.updated",
-						"item": self._current_assistant_message.to_dict(),
-					})
-
-			elif finish_reason == 'tool_calls':
-				# Tool calls completion - finalize all tool calls
-				for index, item in self._current_tool_calls.items():
+				item = exchange.get_last_assistant_message(status='in_progress')
+				if item is not None:
 					item.status = 'completed'
 					await self.LLMChatService.send_update(conversation, {
 						"type": "item.updated",
 						"item": item.to_dict(),
 					})
-					await self.LLMChatService.create_function_call(conversation, exchange, item)
 
-
-	async def _finalize_stream(self, conversation: Conversation, exchange: Exchange) -> None:
-		'''
-		Finalize any pending items when the stream ends.
-		'''
-		# Finalize assistant message if still in progress
-		if self._current_assistant_message is not None and self._current_assistant_message.status == 'in_progress':
-			self._current_assistant_message.status = 'completed'
-			await self.LLMChatService.send_update(conversation, {
-				"type": "item.updated",
-				"item": self._current_assistant_message.to_dict(),
-			})
-
-		# Finalize any tool calls still in progress
-		for index, item in self._current_tool_calls.items():
-			if item.status == 'in_progress':
+			elif finish_reason == 'tool_calls':
+				# Tool calls completion - finalize all tool calls
+				tool_index = choice.get('index')
+				assert tool_index is not None
+				
+				tool_calls_filtered = [*filter(lambda item: isinstance(item, FunctionCall) and item.index == tool_index, exchange.items)]
+				assert len(tool_calls_filtered) == 1
+				item = tool_calls_filtered[0]
 				item.status = 'completed'
 				await self.LLMChatService.send_update(conversation, {
 					"type": "item.updated",
@@ -269,9 +298,45 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 				})
 				await self.LLMChatService.create_function_call(conversation, exchange, item)
 
-		# Reset state
-		self._current_assistant_message = None
-		self._current_tool_calls = {}
+			else:
+				L.warning("Unknown finish reason", struct_data={"finish_reason": finish_reason})
+
+
+	async def _ensure_reasoning_completed(self, conversation: Conversation, exchange: Exchange) -> None:
+		'''
+		Ensure that the reasoning item is completed.
+		'''
+		reasoning = exchange.get_last_item('reasoning', status='in_progress')
+		if reasoning is not None:
+			reasoning.status = 'completed'
+			await self.LLMChatService.send_update(conversation, {
+				"type": "item.updated", 
+				"item": reasoning.to_dict(),
+			})
+
+	async def _finalize_stream(self, conversation: Conversation, exchange: Exchange) -> None:
+		'''
+		Finalize any pending items when the stream ends.
+		'''
+		# Finalize assistant message if still in progress
+		message = exchange.get_last_assistant_message(status='in_progress')
+		if message is not None:
+			message.status = 'completed'
+			await self.LLMChatService.send_update(conversation, {
+				"type": "item.updated",
+				"item": message.to_dict(),
+			})
+
+		# Finalize any tool calls still in progress
+		for item in filter(lambda item: isinstance(item, FunctionCall), exchange.items):
+			if item.status != 'in_progress':
+				continue
+			item.status = 'completed'
+			await self.LLMChatService.send_update(conversation, {
+				"type": "item.updated",
+				"item": item.to_dict(),
+			})
+			await self.LLMChatService.create_function_call(conversation, exchange, item)
 
 
 	def _build_tools(self, conversation: Conversation) -> list[dict]:
@@ -299,11 +364,11 @@ class LLMChatProviderV1ChatCompletition(LLMChatProviderABC):
 		}
 		'''
 		tools = []
-		for tool in conversation.tools:
+		for tool_name, tool in conversation.tools.items():
 			tools.append({
 				"type": "function",
 				"function": {
-					"name": tool.name,
+					"name": tool_name,
 					"description": tool.description,
 					"parameters": tool.parameters,
 				}

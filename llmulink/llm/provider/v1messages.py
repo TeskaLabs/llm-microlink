@@ -6,6 +6,7 @@ import aiohttp
 
 import asab
 
+from ..models import measure_tokens_vllm
 from ..datamodel import Conversation, Exchange, AssistentMessage, AssistentReasoning, FunctionCall
 from .provider_abc import LLMChatProviderABC
 
@@ -19,10 +20,12 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 	https://platform.claude.com/docs/en/api/messages/create
 	'''
 
-	def __init__(self, service, *, url, **kwargs):
+	def __init__(self, service, *, url, max_model_len=None, **kwargs):
 		super().__init__(service, url=url)
 		self.APIKey = kwargs.get('api_key', None)
 		self.Semaphore = asyncio.Semaphore(2)
+		self.MaxModelLen = max_model_len
+
 
 	def prepare_headers(self):
 		headers = {
@@ -85,10 +88,14 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 
 		data = {
 			"model": model,
-			"system": conversation.instructions,
+			"system": "\n".join(conversation.instructions),
 			"messages": messages,
-			"max_tokens": 4096,
+			"max_tokens": 40*1024,
 			"stream": True,
+			"thinking": {
+				"type": "enabled",
+				"budget_tokens": 10000,   # Antropic API requires a budget for thinking
+			},
 		}
 
 		tools = self._build_tools(conversation)	
@@ -98,6 +105,13 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 		L.log(asab.LOG_NOTICE, "Sending request to LLM", struct_data={"conversation_id": conversation.conversation_id, "model": model, "provider": self.URL})
 
 		async with aiohttp.ClientSession(headers=self.prepare_headers()) as session:
+
+			# vLLM tokenize endpoint
+			if self.MaxModelLen is None:
+				# The Anthropic API is measuring tokens internally, so we don't need to measure them here,
+				# if max model length was provided
+				await measure_tokens_vllm(self.LLMChatService, session, self.URL, data, conversation)
+
 			async with session.post(self.URL + "v1/messages", json=data) as response:
 				if response.status != 200:
 					text = await response.text()
@@ -108,10 +122,6 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 					return
 
 				assert response.content_type == "text/event-stream"
-
-				# State for tracking content blocks
-				self._current_content_block = None
-				self._current_content_block_index = None
 
 				async for line in response.content:
 					line = line.decode("utf-8").rstrip('\n\r')
@@ -152,7 +162,32 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				#     "usage": {"input_tokens": 25, "output_tokens": 1}
 				#   }
 				# }
+				input_tokens = data.get('message', {}).get('usage', {}).get('input_tokens', None)
+				if input_tokens is not None:
+					await self.LLMChatService.send_update(conversation, {
+						"type": "chat.tokens",
+						"token_count": input_tokens,
+						"token_max": self.MaxModelLen,
+					})
+
+			case 'message_delta':
+				# {
+				#   "type": "message_delta",
+				#   "delta": {"stop_reason": "end_turn", "stop_sequence": null},
+				#   "usage": {"input_tokens": 25, "output_tokens": 15}
+				# }
+				input_tokens = data.get('message', {}).get('usage', {}).get('input_tokens', None)
+				if input_tokens is not None:
+					await self.LLMChatService.send_update(conversation, {
+						"type": "chat.tokens",
+						"token_count": input_tokens,
+						"token_max": self.MaxModelLen,
+					})
+
+			case 'message_stop':
+				# {"type": "message_stop"}
 				pass
+
 
 			case 'content_block_start':
 				# {
@@ -172,7 +207,7 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				#   "index": 0,
 				#   "content_block": {"type": "tool_use", "id": "...", "name": "...", "input": ""}
 				# }
-				self._current_content_block_index = data.get('index')
+				index = data.get('index')
 				content_block = data.get('content_block', {})
 				block_type = content_block.get('type')
 
@@ -183,12 +218,14 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 							role='assistant',
 							content=content_block.get('text', ''),
 							status='in_progress',
+							index=index,
 						)
 
 					case 'thinking':
 						item = AssistentReasoning(
 							content=content_block.get('thinking', ''),
 							status='in_progress',
+							index=index,
 						)
 
 					case 'tool_use':
@@ -197,13 +234,13 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 							name=content_block.get('name', ''),
 							arguments='',
 							status='in_progress',
+							index=index,
 						)
 
 					case _:
 						L.warning("Unknown content block type", struct_data={"type": block_type})
 
 				if item is not None:
-					self._current_content_block = item
 					exchange.items.append(item)
 					await self.LLMChatService.send_update(conversation, {
 						"type": "item.appended",
@@ -230,8 +267,10 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				# }
 				delta = data.get('delta', {})
 				delta_type = delta.get('type')
+				index = data.get('index')
+				assert index is not None
 
-				item = self._current_content_block
+				item = self._get_item_by_index(exchange, index)
 				if item is None:
 					L.warning("Received delta without active content block")
 					return
@@ -270,7 +309,9 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				#   "type": "content_block_stop",
 				#   "index": 0
 				# }
-				item = self._current_content_block
+				index = data.get('index')
+				assert index is not None
+				item = self._get_item_by_index(exchange, index)
 				if item is not None:
 					item.status = 'completed'
 					await self.LLMChatService.send_update(conversation, {
@@ -280,21 +321,6 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 
 					if isinstance(item, FunctionCall):
 						await self.LLMChatService.create_function_call(conversation, exchange, item)
-
-				self._current_content_block = None
-				self._current_content_block_index = None
-
-			case 'message_delta':
-				# {
-				#   "type": "message_delta",
-				#   "delta": {"stop_reason": "end_turn", "stop_sequence": null},
-				#   "usage": {"output_tokens": 15}
-				# }
-				pass
-
-			case 'message_stop':
-				# {"type": "message_stop"}
-				pass
 
 			case 'ping':
 				# Keepalive event
@@ -309,14 +335,21 @@ class LLMChatProviderV1Messages(LLMChatProviderABC):
 				L.warning("Unknown/unhandled event", struct_data={"type": event_type})
 
 
+	def _get_item_by_index(self, exchange: Exchange, index: int) -> AssistentMessage|AssistentReasoning|FunctionCall|None:
+		for item in exchange.items:
+			if hasattr(item, 'index') and item.index == index:
+				return item
+		return None
+
+
 	def _build_tools(self, conversation: Conversation) -> list[dict]:
 		'''
 		https://platform.claude.com/docs/en/api/messages/create
 		'''
 		tools = []
-		for tool in conversation.tools:
+		for tool_name, tool in conversation.tools.items():
 			tools.append({
-				"name": tool.name,  # Name of the tool.
+				"name": tool_name,  # Name of the tool.
 				"description": tool.description,  # Optional, but strongly-recommended description of the tool.
 				"input_schema": tool.parameters,  # JSON schema defining the tool's input arguments.
 			})

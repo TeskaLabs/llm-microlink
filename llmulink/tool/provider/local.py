@@ -1,8 +1,7 @@
 import logging
-import typing
 
 from .provider_abc import ToolProviderABC
-from .function_call.ping import fuction_call_ping
+from .function_call.ping import ping_tool
 from ..tool import FunctionCallTool
 
 #
@@ -10,33 +9,31 @@ from ..tool import FunctionCallTool
 L = logging.getLogger(__name__)
 
 #
+
 class LocalToolProvider(ToolProviderABC):
 		
 
-	def get_tools(self) -> list[typing.Any]:	
-		tools = [
-			FunctionCallTool(
-				name = "ping",
-				title = "Ping a host",
-				description = "Ping a host and return the result",
-				parameters = {
-					"type": "object",
-					"properties": {
-						"target": {
-							"type": "string",
-							"description": "The fully qualified hostname or IP address to ping"
-						}
-					},
-					"required": ["host"]
-				},
-				function_call = fuction_call_ping
-			)
-		]
-		return tools
+	async def locate_tool(self, tool_name) -> FunctionCallTool:
+		match tool_name:
 
+			case "ping":
+				return ping_tool
 
-	def get_tool(self, function_call):
-		for tool in self.get_tools():
-			if tool.name == function_call.name:
-				return tool
-		return None
+			case "busybox":
+				from ...sandbox.tool_busybox import busybox_tool
+				return busybox_tool
+
+			case "compile_parser":
+				from ...parser_builder.tool_compile_parser import compile_parser_tool
+				return compile_parser_tool
+
+			case "edit_parser":
+				from ...parser_builder.tool_edit_parser import edit_parser_tool
+				return edit_parser_tool
+
+			case "test_parser":
+				from ...parser_builder.tool_test_parser import test_parser_tool
+				return test_parser_tool
+
+			case _:
+				return None

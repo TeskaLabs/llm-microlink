@@ -6,6 +6,7 @@ import asab.web.rest
 
 from .llm import LLMRouterService, LLMWebHandler
 from .tool import ToolService, ToolWebHandler
+from .sandbox import SandboxService
 
 #
 
@@ -19,7 +20,13 @@ asab.Config.add_defaults({
 	},
 	"library": {
 		"providers": "file://./library",
-	}
+	},
+	"tools": {
+		"default": ["ping"],
+	},
+	"sandbox": {
+		"path": "/sandboxes",
+	},
 })
 
 
@@ -53,10 +60,13 @@ class LLMMicrolinkApplication(asab.Application):
 		# Initialize LibraryService
 		self.LibraryService = asab.library.LibraryService(self, "LibraryService")
 
-		# Initialize LLMConversationRouterService
-		self.LLMRouterService = LLMRouterService(self)
-		self.LLMWebHandler = LLMWebHandler(self)
+		# Initialize SandboxService
+		self.SandboxService = SandboxService(self)
 
 		# Initialize ToolService
 		self.ToolService = ToolService(self)
 		self.ToolWebHandler = ToolWebHandler(self)
+
+		# Initialize LLMConversationRouterService
+		self.LLMRouterService = LLMRouterService(self)
+		self.LLMWebHandler = LLMWebHandler(self)

@@ -19,54 +19,18 @@ class ZookeeperToolProvider(ToolProviderABC):
 	def __init__(self, tool_service):
 		super().__init__(tool_service)
 
-		self.Tools = []
-		
-		tool_service.App.PubSub.subscribe("ZooKeeperContainer.state/CONNECTED!", self.discover)
-		tool_service.App.PubSub.subscribe("application.tick/10!", self.discover)
+		self.ToolsBasePath = "/asab/llm/tool"
+		self.Cache = {}
 
 
-	async def initialize(self):
-		await self.discover("initialize")
+	async def locate_tool(self, tool_name) -> FunctionCallTool:
+		tool = self.Cache.get(tool_name)
+		if tool is not None:
+			return tool
 
+		tool_path = f"{self.ToolsBasePath}/{tool_name}"
 
-	def get_tools(self) -> list[typing.Any]:
-		return self.Tools
-
-
-	def get_tool(self, function_call):
-		for tool in self.get_tools():
-			if tool.name == function_call.name:
-				return tool
-		return None
-
-
-	async def discover(self, event_name, zkcontainer = None):
-		if zkcontainer is not None and zkcontainer != self.ToolService.App.ZkContainer:
-			# Not for me
-			return
-
-		zk = self.ToolService.App.ZkContainer.ZooKeeper
-
-		if not zk.Client.connected:
-			return
-
-		toolsbasepath = "/asab/llm/tool"
-
-		toolslist =  await zk.get_children(toolsbasepath)
-		if toolslist is None:
-			return
-
-		tools = []
-		for item in toolslist:
-			tool = await self._discover_tool(zk, f"{toolsbasepath}/{item}")
-			if tool is not None:
-				tools.append(tool)
-
-		self.Tools = tools
-
-
-	async def _discover_tool(self, zk, tool_path):
-		tool_data, _ = await zk.get(tool_path)
+		tool_data, _ = await self.ToolService.App.ZkContainer.ZooKeeper.get(tool_path)
 		if tool_data is None:
 			return
 
@@ -93,13 +57,15 @@ class ZookeeperToolProvider(ToolProviderABC):
 				L.warning("Unknown function call type", struct_data={"function_call_type": function_call_type})
 				return
 
-		return FunctionCallTool(
+		tool = FunctionCallTool(
 			name=tool_definition.name,
 			description=tool_definition.description,
 			parameters=tool_definition.parameters.model_dump(),
 			title=tool_definition.title,
 			function_call=function_call,
 		)
+		self.Cache[tool_name] = tool
+		return tool
 
 
 class ToolDefine(pydantic.BaseModel):

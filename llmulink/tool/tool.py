@@ -7,4 +7,5 @@ class FunctionCallTool(pydantic.BaseModel):
 	description: str
 	parameters: dict
 	title: str = None
-	function_call: typing.Any = None
+	function_call: typing.Callable = None
+	init_call: typing.Callable = None

@@ -2,15 +2,16 @@ import json
 import logging
 import asyncio
 
+from ...tool import FunctionCallTool
 
 L = logging.getLogger(__name__)
 
-async def fuction_call_ping(function_call) -> None:
+async def fuction_call_ping(conversation, function_call) -> None:
 	"""
-	Ping a target host or service to check if it's reachable.
+	Ping a hostname or IP address to check if it's reachable.
 	
 	Args:
-		target: The target host or service to ping
+		host: The hostname or IP address to ping
 		reply: Async callback to submit JSON chunks to the webui client
 	
 	Returns:
@@ -26,9 +27,9 @@ async def fuction_call_ping(function_call) -> None:
 		function_call.error = True
 		return
 
-	target = arguments.get("target")
+	target = arguments.get("host")
 	if not target:
-		function_call.content = "Parameter 'target' is required"
+		function_call.content = "Parameter 'host' is required"
 		function_call.error = True
 		return
 
@@ -39,7 +40,7 @@ async def fuction_call_ping(function_call) -> None:
 	)
 	
 	if not sanitized_target:
-		function_call.content = "Invalid paramater 'target' specified"
+		function_call.content = "Invalid paramater 'host' specified"
 		function_call.error = True
 		return
 	
@@ -94,3 +95,21 @@ async def fuction_call_ping(function_call) -> None:
 		L.exception("Exception occurred while executing ping", struct_data={"error": str(e)})
 		function_call.content = "Exception occurred while executing command 'ping'"
 		function_call.error = True
+
+
+ping_tool = FunctionCallTool(
+	name = "ping",
+	title = "Ping a host",
+	description = "Ping a host and return the result",
+	parameters = {
+		"type": "object",
+		"properties": {
+			"host": {
+				"type": "string",
+				"description": "The hostname or IP address to ping"
+			}
+		},
+		"required": ["host"]
+	},
+	function_call = fuction_call_ping
+)

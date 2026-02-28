@@ -1,0 +1,11 @@
+define:
+  type: llm/skill
+
+instructions:
+  - +prompt.md
+
+tools:
+  - compile_parser
+  - edit_parser
+  - test_parser
+  - busybox

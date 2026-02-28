@@ -8,7 +8,8 @@ import asab
 import yaml
 import jinja2
 
-from .datamodel import Conversation, UserMessage, Exchange, FunctionCall, FunctionCallTool
+from .datamodel import Conversation, UserMessage, Exchange, FunctionCall
+from .models import get_models
 
 from .provider.v1response import LLMChatProviderV1Response
 from .provider.v1messages import LLMChatProviderV1Messages
@@ -31,10 +32,8 @@ class LLMRouterService(asab.Service):
 		self.Providers = []
 		self.Conversations = dict[str, Conversation]()
 
-		self.load_providers()
 
-
-	def load_providers(self):
+	async def initialize(self, app):
 		for section in asab.Config.sections():
 			if not section.startswith("provider:"):
 				continue
@@ -47,9 +46,54 @@ class LLMRouterService(asab.Service):
 					self.Providers.append(LLMChatProviderV1Messages(self, **asab.Config[section]))
 				case 'LLMChatProviderV1ChatCompletition':
 					self.Providers.append(LLMChatProviderV1ChatCompletition(self, **asab.Config[section]))
+				case 'vllm':
+					provider = await self._initialize_vllm(asab.Config[section])
+					if provider is not None:
+						self.Providers.append(provider)
 				case _:
 					L.warning("Unknown provider type, skipping", struct_data={"type": ptype})
 
+
+	async def _initialize_vllm(self, config: dict):
+		'''
+		vLLM can run a single model.
+		We will try to identifty the model and select a proper provider for it.
+		'''
+		url = config.get('url')
+		models = await get_models(url)
+		if models is None or len(models) == 0:
+			L.warning("No models found, skipping", struct_data={"url": url})
+			return None
+
+		assert len(models) == 1, "vLLM can run a single model"
+		model = models[0]
+		model_id = model['id']
+
+		# Get the max model length / context window
+		max_model_len = model.get('max_model_len', None)
+
+		match model_id:
+			case "arcee-ai/Trinity-Large-Preview-FP8":
+				return LLMChatProviderV1ChatCompletition(self, **config)
+			case "stepfun-ai/Step-3.5-Flash" | "stepfun-ai/Step-3.5-Flash-FP8":
+				return LLMChatProviderV1ChatCompletition(self, **config)
+			case "mistralai/Devstral-2-123B-Instruct-2512":
+				return LLMChatProviderV1ChatCompletition(self, **config)
+			case "openai/gpt-oss-120b" | "openai/gpt-oss-20b":
+				# https://docs.vllm.ai/projects/recipes/en/latest/OpenAI/GPT-OSS.html#usage
+				return LLMChatProviderV1Response(self, **config)
+			case "MiniMaxAI/MiniMax-M2.5" | "lukealonso/MiniMax-M2.5-NVFP4":
+				# https://platform.minimax.io/docs/api-reference/text-api
+				# reasoning-parser: minimax_m2
+				return LLMChatProviderV1Messages(self, max_model_len=max_model_len, **config)
+			case "Qwen/Qwen3.5-397B-A17B-FP8" | "Qwen/Qwen3.5-122B-A10B" | "Qwen/Qwen3.5-35B-A3B":
+				return LLMChatProviderV1ChatCompletition(self, **config)
+			case "zai-org/GLM-4.7-FP8":
+				return LLMChatProviderV1ChatCompletition(self, **config)
+			case _:
+				L.warning("Unknown model, using default LLMChatProviderV1ChatCompletition", struct_data={"model_id": model_id})
+				return LLMChatProviderV1ChatCompletition(self, **config)
+		
 
 	async def create_conversation(self):
 		while True:
@@ -60,13 +104,25 @@ class LLMRouterService(asab.Service):
 
 		L.log(asab.LOG_NOTICE, "New conversation created", struct_data={"conversation_id": conversation_id})
 
-		async with self.LibraryService.open("/AI/Prompts/default.yaml") as item_io:
-			promt_decl = yaml.safe_load(item_io.read().decode("utf-8"))
+		async with self.LibraryService.open("/AI/Prompts/default.md") as item_io:
+			# instructions = yaml.safe_load(item_io.read().decode("utf-8"))
+			instructions = item_io.read().decode("utf-8")
+
+		tools = {}
+
+		# Initialize default tools
+		for tool_name in asab.Config["tools"]["default"].split('\n'):
+			tool_name = tool_name.strip()
+			if len(tool_name) == 0:
+				continue
+			tool = await self.App.ToolService.locate_tool(tool_name)
+			if tool is not None:
+				tools[tool_name] = tool
 
 		conversation = Conversation(
 			conversation_id=conversation_id,
-			instructions=promt_decl["instructions"],
-			tools=self.App.ToolService.get_tools()
+			instructions=[instructions],
+			tools=tools,
 		)
 		self.Conversations[conversation.conversation_id] = conversation
 		return conversation
@@ -88,13 +144,50 @@ class LLMRouterService(asab.Service):
 			
 
 	async def update_instructions(self, conversation: Conversation, item: str, params: dict) -> None:
-		assert item.startswith("/AI/Prompts/"), "Item must be a prompt in the AI/Prompts directory"
-		
-		async with self.LibraryService.open(item) as item_io:
-			promt_decl = yaml.safe_load(item_io.read().decode("utf-8"))
+		if item.startswith("/AI/Prompts/"):
+			instructions = None
+			async with self.LibraryService.open(item) as item_io:
+				if item_io is not None:
+					instructions = item_io.read().decode("utf-8")
 
-		instructions = promt_decl["instructions"]
-		conversation.instructions = jinja2.Template(instructions).render(params)
+			if instructions is not None:
+				conversation.instructions = [jinja2.Template(instructions).render(params)]
+			else:
+				L.warning("Prompt not found", struct_data={"item": item})
+
+		elif item.startswith("/AI/Skill/"):
+			definition = None
+			async with self.LibraryService.open(item+"index.yaml") as item_io:
+				if item_io is not None:
+					definition = yaml.safe_load(item_io.read().decode("utf-8"))
+			assert definition is not None, "Index not found"
+
+			conversation.instructions = []
+			for instruction in definition['instructions']:
+				if instruction.startswith('+'):
+					instruction = await self.load_instruction(item, instruction, params)
+					if instruction is not None:
+						conversation.instructions.append(instruction)
+				else:
+					conversation.instructions.append(instruction)
+
+			if 'tools' in definition:
+				tools = {}
+				for tool_name in definition['tools']:
+					tool = await self.App.ToolService.locate_tool(tool_name)
+					if tool is not None:
+						tools[tool_name] = tool
+					else:
+						L.warning("Tool not found", struct_data={"tool_name": tool_name})
+
+				conversation.tools = tools
+
+			if item == '/AI/Skill/ParserBuilder/':
+				from ..parser_builder import init_parser_builder
+				await init_parser_builder(self.App, conversation)
+
+		else:
+			L.warning("Unknown item, skipping", struct_data={"item": item})
 
 
 	async def get_conversation(self, conversation_id, create=False):
@@ -158,11 +251,27 @@ class LLMRouterService(asab.Service):
 
 
 	async def task_chat_request(self, conversation: Conversation, exchange: Exchange) -> None:
-		model = conversation.get_model()
-		assert model is not None, "Model is not set"
+		model_id = conversation.get_model()
+		assert model_id is not None, "Model is not set"
+
+		providers = []
+		async def collect_models(provider):
+			try:
+				pmodels = await get_models(provider.URL, provider.prepare_headers())
+				for pm in pmodels:
+					if pm['id'] == model_id:
+						providers.append(provider)
+						return
+			except Exception as e:
+				L.exception("Error collecting models", struct_data={"provider": provider.__class__.__name__})
+
+		async with asyncio.TaskGroup() as tg:
+			for provider in self.Providers:
+				tg.create_task(collect_models(provider))
+
+		await self.App.ToolService.ensure_init(conversation)
 
 		# Find and select a provider for the model
-		providers = [provider for provider in self.Providers if model in set(model['id'] for model in provider.Models)]
 		assert len(providers) > 0, "No provider found for model"
 		provider = random.choice(providers)
 
@@ -186,7 +295,7 @@ class LLMRouterService(asab.Service):
 
 		async def collect_models(models, provider):
 			try:
-				pmodels = await provider.get_models()
+				pmodels = await get_models(provider.URL, provider.prepare_headers())
 			except Exception as e:
 				L.exception("Error collecting models", struct_data={"provider": provider.__class__.__name__})
 				return
@@ -242,7 +351,7 @@ class LLMRouterService(asab.Service):
 		})
 
 		try:
-			async for _ in self.App.ToolService.execute(function_call):
+			async for _ in self.App.ToolService.execute(conversation, function_call):
 				await self.send_update(conversation, {
 					"type": "item.updated",
 					"item": function_call.to_dict(),
@@ -262,6 +371,31 @@ class LLMRouterService(asab.Service):
 
 			# Flag the conversation that is chat requested
 			conversation.loop_break = False
+
+
+	async def load_instruction(self, item: str, instruction: str, params: dict) -> str | None:
+		'''
+		Load an instruction from a file.
+		If the instruction starts with a '+', then it is a sub-instruction.
+		'''
+		async with self.LibraryService.open(item + instruction[1:]) as item_io:
+			if item_io is None:
+				return None
+			item_content = item_io.read().decode("utf-8")
+
+			lines = []
+			for line in item_content.split("\n"):
+				if line.startswith('+'):
+					instruction = await self.load_instruction(item, line, params)
+					if instruction is not None:
+						lines.append(instruction)
+					else:
+						lines.append(line)
+				else:
+					lines.append(line)
+
+			item_content = jinja2.Template('\n'.join(lines)).render(params)
+			return item_content
 
 
 def normalize_text(text: str) -> str:
